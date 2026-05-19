@@ -437,6 +437,12 @@
 
     const isMobile = () => window.innerWidth <= 700;
 
+    const emptyStateHtml = () => `<div class="empty-state"><pre class="empty-art">   ╭──────╮
+   │ ▒▒▒▒ │
+   │ ▒▒▒▒ │
+   ╰──────╯
+  crouton</pre><div class="empty-msg">pick a vm <span class="cursor">▎</span></div></div>`;
+
     // toasts
     function toast(msg, kind = 'ok') {
       const t = document.createElement('div');
@@ -616,11 +622,7 @@
       const vm = vms.find(v => v.name === selected);
       if (!vm) {
         stopPolling();
-        inner.innerHTML = '<div class="empty-state"><pre class="empty-art">   ╭──────╮
-   │ ▒▒▒▒ │
-   │ ▒▒▒▒ │
-   ╰──────╯
-  crouton</pre><div class="empty-msg">pick a vm <span class="cursor">▎</span></div></div>';
+        inner.innerHTML = emptyStateHtml();
         return;
       }
 

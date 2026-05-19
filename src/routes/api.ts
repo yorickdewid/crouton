@@ -182,8 +182,10 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
         case "pause": await chApi.vmPause(name); break;
         case "resume": await chApi.vmResume(name); break;
         case "shutdown":
-          try { await chApi.vmShutdown(name); }
-          catch { await vmManager.stopVM(name); }
+          // try { await chApi.vmShutdown(name); }
+          // catch { await vmManager.stopVM(name); }
+          // TODO: NOTE: We need to kill the process otherwise it keeps running.
+          await vmManager.stopVM(name);
           break;
       }
       wsHub.pushVMs();

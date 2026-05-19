@@ -18,6 +18,8 @@ export interface VMConfig {
   kernelPath?: string;
   /** Attached disk image paths. */
   disks: string[];
+  /** If `true`, Crouton starts this VM automatically on its own startup. */
+  autostart?: boolean;
 }
 
 /** Runtime metadata for a VM currently known by the manager. */

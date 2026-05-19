@@ -36,6 +36,20 @@ const handleApi = createApiRouter({
   vmManager, chApi, provisioner, configStore, net, wsHub, snapshots, vmDir: config.vmDir,
 });
 
+// Auto-start VMs flagged with `autostart: true` in their crouton.json.
+// Discovery already determined which ones are stopped vs already running.
+const autostartTargets = seed.filter(vm => vm.state === "stopped" && vm.config.autostart);
+if (autostartTargets.length > 0) {
+  console.log(`autostarting ${autostartTargets.length} VM(s): ${autostartTargets.map(v => v.name).join(", ")}`);
+  for (const vm of autostartTargets) {
+    try {
+      await vmManager.startVM(vm.config);
+    } catch (e) {
+      console.error(`failed to autostart ${vm.name}:`, (e as Error).message);
+    }
+  }
+}
+
 const ui = await Bun.file(`${import.meta.dir}/ui/index.html`).text();
 
 const server = Bun.serve({

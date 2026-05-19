@@ -1,6 +1,6 @@
 import path from "path";
 import { mkdir } from "fs/promises";
-import { CreateVMOptionsSchema, CloneVMOptionsSchema, type VMProvisioner } from "../vm/create";
+import { CreateVMOptionsSchema, CloneVMOptionsSchema, ToggleSchema, type VMProvisioner } from "../vm/create";
 import type { VMInstance } from "../types";
 import type { SnapshotStore } from "../vm/snapshots";
 import type { VMManager } from "../vm/manager";
@@ -149,6 +149,32 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
     }
   };
 
+  /** `PUT /api/vms/:name/autostart` — toggle the autostart flag. */
+  const setAutostart = async (name: string, req: Request): Promise<Response> => {
+    let raw: unknown;
+    try { raw = await req.json(); }
+    catch { return json({ error: "request body is not valid JSON" }, 400); }
+
+    const parsed = ToggleSchema.safeParse(raw);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const where = issue.path.length ? issue.path.join(".") : "body";
+      return json({ error: `${where}: ${issue.message}` }, 400);
+    }
+
+    const vm = vmManager.getVM(name);
+    if (!vm) return json({ error: "not found" }, 404);
+
+    vm.config.autostart = parsed.data.value;
+    try {
+      await configStore.write(vm.config);
+    } catch (e) {
+      return error(e);
+    }
+    wsHub.pushVMs();
+    return ok();
+  };
+
   /** `POST /api/vms/:name/start` */
   const startVM = async (name: string): Promise<Response> => {
     const vm = vmManager.getVM(name);
@@ -249,6 +275,9 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
 
     const cloneMatch = pathname.match(/^\/api\/vms\/([^/]+)\/clone$/);
     if (cloneMatch && req.method === "POST") return cloneVM(cloneMatch[1], req);
+
+    const autostartMatch = pathname.match(/^\/api\/vms\/([^/]+)\/autostart$/);
+    if (autostartMatch && req.method === "PUT") return setAutostart(autostartMatch[1], req);
 
     const actionMatch = pathname.match(/^\/api\/vms\/([^/]+)\/(reboot|pause|resume|shutdown)$/);
     if (actionMatch && req.method === "PUT") {

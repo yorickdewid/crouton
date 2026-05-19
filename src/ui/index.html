@@ -532,6 +532,53 @@
       r: 2.5;
     }
 
+    /* settings rows */
+    .setting-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 0;
+      border-bottom: 1px solid var(--border);
+    }
+    .setting-row:first-child { border-top: 1px solid var(--border); }
+    .setting-text { display: flex; flex-direction: column; gap: 3px; }
+    .setting-label { font-size: 13px; color: var(--text); }
+    .setting-hint { font-size: 11px; color: var(--muted); }
+
+    .toggle {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      width: 40px;
+      height: 22px;
+      border-radius: 11px;
+      padding: 0;
+      cursor: pointer;
+      position: relative;
+      transition: background 0.18s, border-color 0.18s;
+      flex-shrink: 0;
+    }
+    .toggle.on { background: var(--accent); border-color: var(--accent); }
+    .toggle .knob {
+      position: absolute;
+      top: 1px;
+      left: 1px;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--bg);
+      transition: transform 0.18s;
+    }
+    .toggle.on .knob { transform: translateX(18px); background: var(--bg); }
+    .toggle:disabled { opacity: 0.5; cursor: default; }
+
+    /* autostart marker on list rows */
+    .auto-mark {
+      color: var(--accent);
+      font-size: 10px;
+      margin-left: 6px;
+      vertical-align: 1px;
+    }
+
     /* mobile */
     @media (max-width: 700px) {
       .vm-list { width: 100%; border-right: none; }
@@ -641,6 +688,14 @@
       `;
     }
 
+    function Toggle({ value, onChange, disabled }) {
+      return html`
+        <button class=${"toggle" + (value ? " on" : "")} disabled=${disabled} onClick=${() => onChange(!value)} aria-pressed=${value}>
+          <span class="knob"></span>
+        </button>
+      `;
+    }
+
     function Sparkline({ values, color, gradId }) {
       const W = 200, H = 48;
       if (values.length < 2) {
@@ -730,7 +785,10 @@
       return html`
         <div class=${cls.join(" ")} onClick=${onClick}>
           <div class="vm-row-left">
-            <div class="vm-row-name">${vm.name}</div>
+            <div class="vm-row-name">
+              ${vm.name}
+              ${vm.config.autostart ? html`<span class="auto-mark" title="autostarts on boot">⚡</span>` : null}
+            </div>
             <div class="vm-row-sub">${sub}</div>
           </div>
           <${StateBadge} state=${vm.state} />
@@ -870,10 +928,23 @@
           </div>
 
           <div class="sh">Snapshots</div>
-          <div>
+          <div style="margin-bottom:24px">
             ${(vm.snapshots?.length ?? 0) === 0
               ? html`<div class="snap-none">no snapshots yet</div>`
               : vm.snapshots.map(s => html`<div class="snap-row" key=${s}><span>📸 ${s.replace(/_/g, " ")}</span></div>`)}
+          </div>
+
+          <div class="sh">Settings</div>
+          <div>
+            <div class="setting-row">
+              <div class="setting-text">
+                <span class="setting-label">Autostart on boot</span>
+                <span class="setting-hint">Start this VM automatically when Crouton itself starts.</span>
+              </div>
+              <${Toggle}
+                value=${!!vm.config.autostart}
+                onChange=${v => handlers.onSetAutostart(vm.name, v)} />
+            </div>
           </div>
         </div>
       `;
@@ -1098,6 +1169,18 @@
         } catch (e) { toast(e.message, "err"); }
       }, [toast]);
 
+      const onSetAutostart = useCallback(async (name, value) => {
+        try {
+          const res = await fetch(`/api/vms/${name}/autostart`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ value }),
+          });
+          if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "failed"); }
+          toast(value ? `⚡ ${name} — autostart on` : `${name} — autostart off`);
+        } catch (e) { toast(e.message, "err"); }
+      }, [toast]);
+
       const onCreate = useCallback(async (body) => {
         const res = await fetch("/api/vms", {
           method: "POST",
@@ -1119,7 +1202,7 @@
       const subtitle = vm ? vm.name : selected === "create" ? "New VM" : "cloud hypervisor";
 
       const mobile = isMobile();
-      const handlers = { onAct, onStart, onClone, onDelete, onSnap };
+      const handlers = { onAct, onStart, onClone, onDelete, onSnap, onSetAutostart };
 
       return html`
         <${Header}

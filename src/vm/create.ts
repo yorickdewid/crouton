@@ -56,6 +56,14 @@ export const CloneVMOptionsSchema = z.object({
 export type CloneVMOptions = z.infer<typeof CloneVMOptionsSchema>;
 
 /**
+ * Zod schema for a boolean toggle body, used by `PUT /api/vms/:name/autostart`.
+ */
+export const ToggleSchema = z.object({
+  /** The new value for the flag. */
+  value: z.boolean(),
+});
+
+/**
  * Entries inside a source VM directory that must NOT be carried over to a clone.
  * Runtime sockets, snapshot archives, and the config file are all rewritten or
  * regenerated for the new VM.

@@ -5,7 +5,6 @@ import { DownloadImageSchema, type ImageStore } from "../images/store";
 import type { VMInstance } from "../types";
 import type { SnapshotStore } from "../vm/snapshots";
 import type { VMManager } from "../vm/manager";
-import type { CloudHypervisor } from "../api/ch";
 import type { VMConfigStore } from "../vm/persist";
 import type { NetworkManager } from "../net/manager";
 import type { WsHub } from "../server/ws";
@@ -18,7 +17,6 @@ const DEFAULT_MEMORY_MB = 2048;
  */
 export interface ApiRouterDeps {
   vmManager: VMManager;
-  chApi: CloudHypervisor;
   provisioner: VMProvisioner;
   configStore: VMConfigStore;
   net: NetworkManager;
@@ -41,7 +39,7 @@ type ChAction = "reboot" | "pause" | "resume" | "shutdown";
  * returned function is just a regular route table — no class needed.
  */
 export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
-  const { vmManager, chApi, provisioner, configStore, net, wsHub, snapshots, images, vmDir } = deps;
+  const { vmManager, provisioner, configStore, net, wsHub, snapshots, images, vmDir } = deps;
 
   // ── response helpers ───────────────────────────────────────────────────
 
@@ -124,7 +122,7 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
     const ip = await net.macToIp(vm.mac);
     if (ip) vm.ip = ip;
     try {
-      const info = await chApi.vmInfo(name);
+      const info = await vmManager.info(name);
       return json({ ...vm, chInfo: info });
     } catch {
       return json(vm);
@@ -237,15 +235,13 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
   const runAction = async (name: string, action: ChAction): Promise<Response> => {
     try {
       switch (action) {
-        case "reboot": await chApi.vmReboot(name); break;
-        case "pause": await chApi.vmPause(name); break;
-        case "resume": await chApi.vmResume(name); break;
-        case "shutdown":
-          // try { await chApi.vmShutdown(name); }
-          // catch { await vmManager.stopVM(name); }
-          // TODO: NOTE: We need to kill the process otherwise it keeps running.
-          await vmManager.stopVM(name);
-          break;
+        case "reboot": await vmManager.reboot(name); break;
+        case "pause": await vmManager.pause(name); break;
+        case "resume": await vmManager.resume(name); break;
+        // `shutdown` goes via VMManager.stopVM, which delegates to the
+        // runner; the runner tries CH's vm.shutdown and falls back to
+        // SIGTERM internally so the process always dies.
+        case "shutdown": await vmManager.stopVM(name); break;
       }
       wsHub.pushVMs();
       return ok();
@@ -257,7 +253,7 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
   /** `GET /api/vms/:name/counters` */
   const getCounters = async (name: string): Promise<Response> => {
     try {
-      const data = await chApi.vmCounters(name);
+      const data = await vmManager.counters(name);
       return json({ ts: Date.now(), counters: data });
     } catch (e) {
       return error(e);
@@ -276,7 +272,7 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
       const ts = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
       const snapDir = path.join(vmDir, name, "snapshots", ts);
       await mkdir(snapDir, { recursive: true });
-      await chApi.vmSnapshot(name, snapDir);
+      await vmManager.snapshot(name, snapDir);
       wsHub.pushVMs();
       return json({ name: ts });
     } catch (e) {

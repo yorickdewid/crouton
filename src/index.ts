@@ -7,37 +7,37 @@ import { createDiscoverer } from "./vm/discover";
 import { createSnapshotStore } from "./vm/snapshots";
 import { createHostMetrics } from "./host/metrics";
 import { createImageStore } from "./images/store";
+import { createLocalRunner } from "./vm/local-runner";
 import { VMManager } from "./vm/manager";
 import { WsHub } from "./server/ws";
 import { createApiRouter } from "./routes/api";
 
-const chApi = createCloudHypervisor(config.vmDir);
-const net = createNetwork(config.bridgeInterface);
+const chApi       = createCloudHypervisor(config.vmDir);
+const net         = createNetwork(config.bridgeInterface);
 const configStore = createConfigStore(config.vmDir);
-const provisioner = createProvisioner({
-  imageDir: config.imageDir,
-  vmDir: config.vmDir,
-  configStore,
-});
-const discoverer = createDiscoverer({ vmDir: config.vmDir, configStore, chApi, net });
-const snapshots = createSnapshotStore(config.vmDir);
+const provisioner = createProvisioner({ imageDir: config.imageDir, vmDir: config.vmDir, configStore });
+const snapshots   = createSnapshotStore(config.vmDir);
 const hostMetrics = createHostMetrics(config.vmDir);
-const images = createImageStore(config.imageDir);
+const images      = createImageStore(config.imageDir);
+
+// The runner is the only consumer of chApi + net for spawn-side work.
+// When croutond exists it will be replaced by createRemoteRunner(...).
+const runner    = createLocalRunner({ chApi, net, vmDir: config.vmDir, chBinary: config.chBinary });
+const discoverer = createDiscoverer({ vmDir: config.vmDir, configStore, runner, net });
 
 const seed = await discoverer.discover();
 console.log(`discovered ${seed.length} VM(s): ${seed.map(v => `${v.name}(${v.state})`).join(", ")}`);
 
 const vmManager = new VMManager({
   seed,
-  net,
+  runner,
   vmDir: config.vmDir,
-  chBinary: config.chBinary,
   firmwareDir: config.firmwareDir,
 });
 
-const wsHub = new WsHub({ vmManager, chApi, net, snapshots, hostMetrics });
+const wsHub = new WsHub({ vmManager, net, snapshots, hostMetrics });
 const handleApi = createApiRouter({
-  vmManager, chApi, provisioner, configStore, net, wsHub, snapshots, images, vmDir: config.vmDir,
+  vmManager, provisioner, configStore, net, wsHub, snapshots, images, vmDir: config.vmDir,
 });
 
 // Auto-start VMs flagged with `autostart: true` in their crouton.json.

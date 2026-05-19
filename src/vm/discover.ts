@@ -1,6 +1,6 @@
 import path from "path";
 import { stat } from "fs/promises";
-import type { CloudHypervisor } from "../api/ch";
+import type { VMRunner } from "./runner";
 import type { NetworkManager } from "../net/manager";
 import type { VMConfigStore } from "./persist";
 import type { BootMode, VMConfig, VMInstance } from "../types";
@@ -23,8 +23,8 @@ export interface DiscovererDeps {
   vmDir: string;
   /** Source of authoritative per-VM configs when present. */
   configStore: VMConfigStore;
-  /** Client used to ping running VMs and enrich config from `vm.info`. */
-  chApi: CloudHypervisor;
+  /** Runtime backend used to ping running VMs and enrich config from `vm.info`. */
+  runner: VMRunner;
   /** Network helper used for MAC generation and IP resolution. */
   net: NetworkManager;
 }
@@ -46,7 +46,7 @@ const FIRMWARE_NAMES = ["CLOUDHV.fd", "OVMF.fd", "edk2.fd"];
  * socket to determine live state.
  */
 export function createDiscoverer(deps: DiscovererDeps): VMDiscoverer {
-  const { vmDir, configStore, chApi, net } = deps;
+  const { vmDir, configStore, runner, net } = deps;
 
   const listEntries = async (dir: string): Promise<string[]> => {
     try {
@@ -81,14 +81,14 @@ export function createDiscoverer(deps: DiscovererDeps): VMDiscoverer {
     return { name: vmName, bootMode, kernelPath: kernelFile, disks };
   };
 
-  const enrichFromChApi = async (vmName: string, instance: VMInstance): Promise<void> => {
+  const enrichFromRunner = async (vmName: string, instance: VMInstance): Promise<void> => {
     try {
-      const info = await chApi.vmInfo(vmName) as ChVmInfo;
+      const info = await runner.info(vmName) as ChVmInfo;
       const cfg = info?.config;
       if (cfg?.cpus?.boot_vcpus) instance.config.cpus = cfg.cpus.boot_vcpus;
       if (cfg?.memory?.size) instance.config.memoryMb = cfg.memory.size / (1024 * 1024);
     } catch {
-      // CH API unavailable; leave inferred/persisted values in place
+      // Runner / CH unavailable; leave inferred/persisted values in place
     }
   };
 
@@ -105,10 +105,10 @@ export function createDiscoverer(deps: DiscovererDeps): VMDiscoverer {
     const instance: VMInstance = { name, state: "stopped", mac, config: vmConfig };
 
     if (hasSock) {
-      const alive = await chApi.vmmPing(name).catch(() => false);
+      const alive = await runner.ping(name).catch(() => false);
       instance.state = alive ? "running" : "error";
       if (alive) {
-        await enrichFromChApi(name, instance);
+        await enrichFromRunner(name, instance);
         instance.ip = await net.macToIp(mac);
       }
     }

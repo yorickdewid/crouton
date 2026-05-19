@@ -1,6 +1,5 @@
 import type { ServerWebSocket } from "bun";
 import type { VMManager } from "../vm/manager";
-import type { CloudHypervisor } from "../api/ch";
 import type { NetworkManager } from "../net/manager";
 import type { SnapshotStore } from "../vm/snapshots";
 import type { HostMetrics } from "../host/metrics";
@@ -13,8 +12,6 @@ type Client = ServerWebSocket<unknown>;
 export interface WsHubOptions {
   /** Source of VM state. */
   vmManager: VMManager;
-  /** CH client used to fetch per-VM counters for running VMs. */
-  chApi: CloudHypervisor;
   /** Network helper used to resolve IP addresses from MACs. */
   net: NetworkManager;
   /** Read-side access to per-VM snapshot directories. */
@@ -34,7 +31,6 @@ export interface WsHubOptions {
 export class WsHub {
   private readonly clients = new Set<Client>();
   private readonly vmManager: VMManager;
-  private readonly chApi: CloudHypervisor;
   private readonly net: NetworkManager;
   private readonly snapshots: SnapshotStore;
   private readonly hostMetrics: HostMetrics;
@@ -46,7 +42,6 @@ export class WsHub {
    */
   constructor(opts: WsHubOptions) {
     this.vmManager = opts.vmManager;
-    this.chApi = opts.chApi;
     this.net = opts.net;
     this.snapshots = opts.snapshots;
     this.hostMetrics = opts.hostMetrics;
@@ -136,7 +131,7 @@ export class WsHub {
     const data: Record<string, unknown> = {};
     for (const vm of this.vmManager.listVMs()) {
       if (vm.state !== "running") continue;
-      try { data[vm.name] = await this.chApi.vmCounters(vm.name); } catch { /* skip this VM */ }
+      try { data[vm.name] = await this.vmManager.counters(vm.name); } catch { /* skip this VM */ }
     }
     this.send({ type: "counters", ts: Date.now(), data });
   }

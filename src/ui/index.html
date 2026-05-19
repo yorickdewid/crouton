@@ -603,7 +603,9 @@
 
     function VMDetail({ vm, history, handlers }) {
       const alive = vm.state === "running";
-      const r = useMemo(() => alive ? ratesFrom(history, vm.name) : null, [history, vm.name, alive, vm.snapshots?.length]);
+      // No useMemo: history is a stable Map ref but its *contents* mutate on
+      // every WS push. Recomputing on each render is cheap (≤40 samples).
+      const r = alive ? ratesFrom(history, vm.name) : null;
 
       const specs = [
         vm.config.cpus ? `${vm.config.cpus} vcpu` : null,

@@ -1,23 +1,43 @@
 import { config } from "./config";
-import { handleApi } from "./routes/api";
-import { discoverVMs } from "./vm/discover";
+import { CloudHypervisor } from "./api/ch";
+import { NetworkManager } from "./net/manager";
+import { VMConfigStore } from "./vm/persist";
+import { VMProvisioner } from "./vm/create";
+import { VMDiscoverer } from "./vm/discover";
 import { VMManager } from "./vm/manager";
 import { WsHub } from "./server/ws";
+import { ApiRouter } from "./routes/api";
 
-const discovered = await discoverVMs();
-const vmManager = new VMManager(discovered);
-const wsHub = new WsHub(vmManager);
+const chApi       = new CloudHypervisor(config.vmDir);
+const net         = new NetworkManager(config.bridgeInterface);
+const configStore = new VMConfigStore(config.vmDir);
+const provisioner = new VMProvisioner(config.imageDir, config.vmDir, configStore);
+const discoverer  = new VMDiscoverer(config.vmDir, configStore, chApi, net);
+
+const seed = await discoverer.discover();
+console.log(`discovered ${seed.length} VM(s): ${seed.map(v => `${v.name}(${v.state})`).join(", ")}`);
+
+const vmManager = new VMManager({
+  seed,
+  net,
+  vmDir: config.vmDir,
+  chBinary: config.chBinary,
+  firmwareDir: config.firmwareDir,
+});
+
+const wsHub = new WsHub({ vmManager, chApi, net });
+const router = new ApiRouter({
+  vmManager, chApi, provisioner, configStore, net, wsHub, vmDir: config.vmDir,
+});
 
 const ui = await Bun.file(`${import.meta.dir}/ui/index.html`).text();
-
 
 const server = Bun.serve({
   port: config.port,
   hostname: config.host,
 
   async fetch(req, server) {
-    const url = new URL(req.url);
-    const { pathname } = url;
+    const { pathname } = new URL(req.url);
 
     if (pathname === "/ws") {
       if (server.upgrade(req)) return undefined as unknown as Response;
@@ -25,7 +45,7 @@ const server = Bun.serve({
     }
 
     if (pathname.startsWith("/api/")) {
-      const res = await handleApi(req, pathname, vmManager);
+      const res = await router.handle(req, pathname);
       if (res) return res;
     }
 
@@ -37,9 +57,9 @@ const server = Bun.serve({
   },
 
   websocket: {
-    open(ws) { wsHub.addClient(ws); },
+    open(ws)  { wsHub.addClient(ws); },
     close(ws) { wsHub.removeClient(ws); },
-    message() { /* server doesn't need client messages today */ },
+    message() { /* server doesn't consume client messages today */ },
   },
 });
 

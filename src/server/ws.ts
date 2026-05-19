@@ -1,34 +1,62 @@
 import type { ServerWebSocket } from "bun";
-import { type VMManager } from "../vm/manager";
-import { vmCounters } from "../api/ch";
-import { macToIp } from "../net/ip";
+import type { VMManager } from "../vm/manager";
+import type { CloudHypervisor } from "../api/ch";
+import type { NetworkManager } from "../net/manager";
 
 type Client = ServerWebSocket<unknown>;
 
 /**
- * Manages connected WebSocket clients and periodic VM state broadcasts.
+ * Constructor dependencies for {@link WsHub}.
+ */
+export interface WsHubOptions {
+  /** Source of VM state. */
+  vmManager: VMManager;
+  /** CH client used to fetch per-VM counters for running VMs. */
+  chApi: CloudHypervisor;
+  /** Network helper used to resolve IP addresses from MACs. */
+  net: NetworkManager;
+  /** Refresh interval in milliseconds. Defaults to 500. */
+  refreshInterval?: number;
+}
+
+/**
+ * Push channel for the dashboard. Tracks connected WebSocket clients and
+ * broadcasts periodic VM-state and counter snapshots; also exposes
+ * {@link pushVMs} for callers (e.g. action routes) that want to send an
+ * update immediately rather than waiting for the next tick.
  */
 export class WsHub {
   private readonly clients = new Set<Client>();
-  private readonly refreshInterval = 500; // ms
   private readonly vmManager: VMManager;
+  private readonly chApi: CloudHypervisor;
+  private readonly net: NetworkManager;
+  private readonly refreshInterval: number;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
 
   /**
-   * Creates a new WebSocket hub with a reference to the VM manager.
-   * @param vmManager - The VM manager instance to query for VM states
+   * @param opts - See {@link WsHubOptions}.
    */
-  constructor(vmManager: VMManager) {
-    this.vmManager = vmManager;
+  constructor(opts: WsHubOptions) {
+    this.vmManager = opts.vmManager;
+    this.chApi = opts.chApi;
+    this.net = opts.net;
+    this.refreshInterval = opts.refreshInterval ?? 500;
   }
 
   /**
-   * Registers a client and immediately sends a VM snapshot.
+   * Number of currently connected clients.
+   */
+  get clientCount(): number {
+    return this.clients.size;
+  }
+
+  /**
+   * Registers a new client and pushes an initial VM snapshot so the
+   * dashboard doesn't have to wait for the next tick on first connect.
    */
   addClient(ws: Client): void {
     this.clients.add(ws);
-    // Send initial snapshot immediately so the new client doesn't wait for the next tick.
-    this.pushVMs().catch(() => { });
+    this.pushVMs().catch(() => { /* swallow — broadcast errors mustn't crash add */ });
   }
 
   /**
@@ -39,24 +67,14 @@ export class WsHub {
   }
 
   /**
-   * Broadcasts a JSON-serializable message to all connected clients.
-   */
-  private send(msg: unknown): void {
-    if (this.clients.size === 0) return;
-    const text = JSON.stringify(msg);
-    for (const ws of this.clients) {
-      try { ws.send(text); } catch { }
-    }
-  }
-
-  /**
-   * Pushes the current VM list to clients, enriching running VMs with discovered IP addresses.
+   * Pushes the current VM list to all clients, enriching running VMs with
+   * their currently-observed IP.
    */
   async pushVMs(): Promise<void> {
     const vms = this.vmManager.listVMs();
     for (const vm of vms) {
       if (vm.state === "running") {
-        const ip = await macToIp(vm.mac);
+        const ip = await this.net.macToIp(vm.mac);
         if (ip) vm.ip = ip;
       }
     }
@@ -64,26 +82,47 @@ export class WsHub {
   }
 
   /**
-   * Pushes per-VM runtime counters for running VMs.
+   * Begins the periodic refresh loop. Idempotent.
+   */
+  startRefreshLoop(): void {
+    if (this.refreshTimer) return;
+    this.refreshTimer = setInterval(async () => {
+      if (this.clientCount === 0) return; // skip work when nobody listening
+      await this.pushVMs();
+      await this.pushCounters();
+    }, this.refreshInterval);
+  }
+
+  /**
+   * Stops the periodic refresh loop. Safe to call multiple times.
+   */
+  stopRefreshLoop(): void {
+    if (!this.refreshTimer) return;
+    clearInterval(this.refreshTimer);
+    this.refreshTimer = undefined;
+  }
+
+  /**
+   * Polls counters for every running VM and broadcasts them as a single
+   * map keyed by VM name. Errors on a single VM don't drop the rest.
    */
   private async pushCounters(): Promise<void> {
     const data: Record<string, unknown> = {};
     for (const vm of this.vmManager.listVMs()) {
       if (vm.state !== "running") continue;
-      try { data[vm.name] = await vmCounters(vm.name); } catch { }
+      try { data[vm.name] = await this.chApi.vmCounters(vm.name); } catch { /* skip this VM */ }
     }
     this.send({ type: "counters", ts: Date.now(), data });
   }
 
   /**
-   * Starts a single refresh loop that periodically pushes VM snapshots and counters.
+   * Serialises a message and sends it to every connected client.
    */
-  startRefreshLoop(): void {
-    if (this.refreshTimer) return;
-    this.refreshTimer = setInterval(async () => {
-      if (this.clients.size === 0) return; // skip work when nobody listening
-      await this.pushVMs();
-      await this.pushCounters();
-    }, this.refreshInterval);
+  private send(msg: unknown): void {
+    if (this.clientCount === 0) return;
+    const text = JSON.stringify(msg);
+    for (const ws of this.clients) {
+      try { ws.send(text); } catch { /* dropped sends become disconnects naturally */ }
+    }
   }
 }

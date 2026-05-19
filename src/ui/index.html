@@ -461,30 +461,6 @@
     }
     .theme-toggle:hover { border-color: var(--text); color: var(--text); }
 
-    /* WebSocket live pulse */
-    .ws-pulse {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      font-size: 10px;
-      color: var(--muted);
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      margin-right: 14px;
-    }
-    .ws-pulse .ws-dot {
-      width: 6px; height: 6px;
-      border-radius: 50%;
-      background: var(--accent);
-      box-shadow: 0 0 6px var(--accent);
-      transition: transform 0.15s, box-shadow 0.15s;
-    }
-    .ws-pulse.flash .ws-dot {
-      transform: scale(1.4);
-      box-shadow: 0 0 12px var(--accent), 0 0 20px var(--accent);
-    }
-    .ws-pulse.dead .ws-dot { background: var(--muted); box-shadow: none; }
-
     /* hero stats bar — sits above the VM list */
     .hero {
       display: grid;
@@ -805,8 +781,7 @@
       `;
     }
 
-    function Header({ subtitle, theme, onBack, onToggleTheme, showBack, wsLive, wsFlash }) {
-      const pulseCls = "ws-pulse" + (wsFlash ? " flash" : "") + (!wsLive ? " dead" : "");
+    function Header({ subtitle, theme, onBack, onToggleTheme, showBack }) {
       return html`
         <header>
           ${showBack ? html`<button class="back-btn" style="display:inline" onClick=${onBack}>← back</button>` : null}
@@ -814,7 +789,6 @@
           <span class="sep">/</span>
           <span class="subtitle">${subtitle}</span>
           <span class="spacer"></span>
-          <span class=${pulseCls}><span class="ws-dot"></span>${wsLive ? "live" : "offline"}</span>
           <button class="theme-toggle" onClick=${onToggleTheme}>${theme === "dark" ? "☾" : "☀"}</button>
         </header>
       `;
@@ -1245,10 +1219,7 @@
       const [theme, setTheme] = useState(localStorage.getItem("theme") || "dark");
       const [toasts, setToasts] = useState([]);
       const [, setTick] = useState(0); // forces a re-render when counters arrive
-      const [wsLive, setWsLive] = useState(false);
-      const [wsFlash, setWsFlash] = useState(false);
       const history = useRef(new Map());
-      const flashTimer = useRef(null);
 
       // ── theme ──
       useEffect(() => {
@@ -1271,17 +1242,10 @@
       useEffect(() => {
         let ws, alive = true;
         const proto = location.protocol === "https:" ? "wss:" : "ws:";
-        const flashPulse = () => {
-          setWsFlash(true);
-          if (flashTimer.current) clearTimeout(flashTimer.current);
-          flashTimer.current = setTimeout(() => setWsFlash(false), 180);
-        };
         const connect = () => {
           if (!alive) return;
           ws = new WebSocket(`${proto}//${location.host}/ws`);
-          ws.onopen = () => setWsLive(true);
           ws.onmessage = e => {
-            flashPulse();
             try {
               const msg = JSON.parse(e.data);
               if (msg.type === "vms") setVms(msg.data);
@@ -1292,7 +1256,7 @@
               }
             } catch {}
           };
-          ws.onclose = () => { setWsLive(false); if (alive) setTimeout(connect, 1500); };
+          ws.onclose = () => { if (alive) setTimeout(connect, 1500); };
           ws.onerror = () => ws.close();
         };
         connect();
@@ -1443,8 +1407,6 @@
           subtitle=${subtitle}
           theme=${theme}
           showBack=${mobile && !!selected}
-          wsLive=${wsLive}
-          wsFlash=${wsFlash}
           onBack=${() => setSelected(null)}
           onToggleTheme=${() => setTheme(t => t === "dark" ? "light" : "dark")} />
 

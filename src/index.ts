@@ -2,7 +2,9 @@ import { config } from "./config";
 import { handleApi } from "./routes/api";
 import { discoverVMs } from "./vm/discover";
 import { seedInstances } from "./vm/manager";
-import { addClient, removeClient, startRefreshLoop } from "./server/ws";
+import { WsHub } from "./server/ws";
+
+const wsHub = new WsHub();
 
 const ui = await Bun.file(`${import.meta.dir}/ui/index.html`).text();
 
@@ -35,11 +37,11 @@ const server = Bun.serve({
   },
 
   websocket: {
-    open(ws) { addClient(ws); },
-    close(ws) { removeClient(ws); },
+    open(ws) { wsHub.addClient(ws); },
+    close(ws) { wsHub.removeClient(ws); },
     message() { /* server doesn't need client messages today */ },
   },
 });
 
-startRefreshLoop();
-console.log(`crouton listening on http://${config.host}:${config.port}`);
+wsHub.startRefreshLoop();
+console.log(`Crouton listening on http://${config.host}:${config.port}`);

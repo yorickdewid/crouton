@@ -6,7 +6,7 @@ import { listImages, provisionVM } from "../vm/create";
 import { readVMConfig, writeVMConfig } from "../vm/persist";
 import { macToIp } from "../net/ip";
 import { config } from "../config";
-import { pushVMs } from "../server/ws";
+// import { pushVMs } from "../server/ws";
 import type { CreateVMOptions } from "../vm/create";
 import type { VMConfig } from "../types";
 
@@ -31,7 +31,7 @@ export async function handleApi(req: Request, pathname: string): Promise<Respons
       const opts = (await req.json()) as CreateVMOptions;
       const vmConfig = await provisionVM(opts);
       const instance = await startVM(vmConfig);
-      pushVMs();
+      // pushVMs();
       return json(instance, 201);
     } catch (e: unknown) {
       return json({ error: (e as Error).message }, 400);
@@ -65,7 +65,7 @@ export async function handleApi(req: Request, pathname: string): Promise<Respons
     if (req.method === "DELETE") {
       try {
         await deleteVM(name);
-        pushVMs();
+        // pushVMs();
         return json({ ok: true });
       } catch (e: unknown) {
         return json({ error: (e as Error).message }, 400);
@@ -93,7 +93,7 @@ export async function handleApi(req: Request, pathname: string): Promise<Respons
         await writeVMConfig(cfg);
       }
       const instance = await startVM(cfg);
-      pushVMs();
+      // pushVMs();
       return json(instance);
     } catch (e: unknown) {
       return json({ error: (e as Error).message }, 400);
@@ -105,14 +105,14 @@ export async function handleApi(req: Request, pathname: string): Promise<Respons
   if (actionMatch && req.method === "PUT") {
     const [, name, action] = actionMatch;
     try {
-      if (action === "reboot")   await vmReboot(name);
-      else if (action === "pause")    await vmPause(name);
-      else if (action === "resume")   await vmResume(name);
+      if (action === "reboot") await vmReboot(name);
+      else if (action === "pause") await vmPause(name);
+      else if (action === "resume") await vmResume(name);
       else if (action === "shutdown") {
         try { await vmShutdown(name); }
         catch { await stopVM(name); }
       }
-      pushVMs();
+      // pushVMs();
       return json({ ok: true });
     } catch (e: unknown) {
       return json({ error: (e as Error).message }, 400);

@@ -5,52 +5,75 @@ import { macToIp } from "../net/ip";
 
 type Client = ServerWebSocket<unknown>;
 
-const clients = new Set<Client>();
-let refreshTimer: ReturnType<typeof setInterval> | undefined;
+/**
+ * Manages connected WebSocket clients and periodic VM state broadcasts.
+ */
+export class WsHub {
+  private readonly clients = new Set<Client>();
+  private refreshTimer: ReturnType<typeof setInterval> | undefined;
 
-export function addClient(ws: Client): void {
-  clients.add(ws);
-  // Send initial snapshot immediately so the new client doesn't wait for the next tick.
-  pushVMs().catch(() => {});
-}
-
-export function removeClient(ws: Client): void {
-  clients.delete(ws);
-}
-
-function send(msg: unknown): void {
-  if (clients.size === 0) return;
-  const text = JSON.stringify(msg);
-  for (const ws of clients) {
-    try { ws.send(text); } catch {}
+  /**
+   * Registers a client and immediately sends a VM snapshot.
+   */
+  addClient(ws: Client): void {
+    this.clients.add(ws);
+    // Send initial snapshot immediately so the new client doesn't wait for the next tick.
+    this.pushVMs().catch(() => { });
   }
-}
 
-export async function pushVMs(): Promise<void> {
-  const vms = listVMs();
-  for (const vm of vms) {
-    if (vm.state === "running") {
-      const ip = await macToIp(vm.mac);
-      if (ip) vm.ip = ip;
+  /**
+   * Unregisters a disconnected client.
+   */
+  removeClient(ws: Client): void {
+    this.clients.delete(ws);
+  }
+
+  /**
+   * Broadcasts a JSON-serializable message to all connected clients.
+   */
+  private send(msg: unknown): void {
+    if (this.clients.size === 0) return;
+    const text = JSON.stringify(msg);
+    for (const ws of this.clients) {
+      try { ws.send(text); } catch { }
     }
   }
-  send({ type: "vms", data: vms });
-}
 
-async function pushCounters(): Promise<void> {
-  const data: Record<string, unknown> = {};
-  for (const vm of listVMs()) {
-    if (vm.state !== "running") continue;
-    try { data[vm.name] = await vmCounters(vm.name); } catch {}
+  /**
+   * Pushes the current VM list to clients, enriching running VMs with discovered IP addresses.
+   */
+  async pushVMs(): Promise<void> {
+    const vms = listVMs();
+    for (const vm of vms) {
+      if (vm.state === "running") {
+        const ip = await macToIp(vm.mac);
+        if (ip) vm.ip = ip;
+      }
+    }
+    this.send({ type: "vms", data: vms });
   }
-  send({ type: "counters", ts: Date.now(), data });
-}
 
-export function startRefreshLoop(): void {
-  if (refreshTimer) return;
-  refreshTimer = setInterval(async () => {
-    if (clients.size === 0) return; // skip work when nobody listening
-    await pushVMs();
-    await pushCounters();
-  }, 2000);
+  /**
+   * Pushes per-VM runtime counters for running VMs.
+   */
+  private async pushCounters(): Promise<void> {
+    const data: Record<string, unknown> = {};
+    for (const vm of listVMs()) {
+      if (vm.state !== "running") continue;
+      try { data[vm.name] = await vmCounters(vm.name); } catch { }
+    }
+    this.send({ type: "counters", ts: Date.now(), data });
+  }
+
+  /**
+   * Starts a single refresh loop that periodically pushes VM snapshots and counters.
+   */
+  startRefreshLoop(): void {
+    if (this.refreshTimer) return;
+    this.refreshTimer = setInterval(async () => {
+      if (this.clients.size === 0) return; // skip work when nobody listening
+      await this.pushVMs();
+      await this.pushCounters();
+    }, 500);
+  }
 }

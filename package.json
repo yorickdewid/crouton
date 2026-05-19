@@ -11,5 +11,8 @@
   "devDependencies": {
     "typescript": "^5.0.0",
     "@types/bun": "latest"
+  },
+  "dependencies": {
+    "zod": "^4.4.3"
   }
 }

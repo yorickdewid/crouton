@@ -433,7 +433,6 @@
     let vms = [], images = [], selected = null;
     const history = new Map();
     const HIST = 40;
-    let counterTimer = null;
 
     const isMobile = () => window.innerWidth <= 700;
 
@@ -495,27 +494,7 @@
         <polyline points="${pts}" stroke="${color}"/></svg>`;
     }
 
-    // counters
-    async function pollCounters(name) {
-      try {
-        const res = await fetch(`/api/vms/${name}/counters`);
-        if (!res.ok) return;
-        const { ts, counters } = await res.json();
-
-        let net_rx = 0, net_tx = 0, blk_r = 0, blk_w = 0;
-        for (const [k, d] of Object.entries(counters)) {
-          if (k.startsWith('_net'))  { net_rx += d.rx_bytes||0; net_tx += d.tx_bytes||0; }
-          if (k.startsWith('_disk')) { blk_r  += d.read_bytes||0; blk_w += d.write_bytes||0; }
-        }
-
-        const hist = history.get(name) || [];
-        hist.push({ ts, net_rx, net_tx, blk_r, blk_w });
-        if (hist.length > HIST) hist.shift();
-        history.set(name, hist);
-        updateIO(name);
-      } catch {}
-    }
-
+    // counters — populated by WS push (handleCountersMessage)
     function rates(name, key) {
       const h = history.get(name) || [];
       if (h.length < 2) return [];
@@ -549,15 +528,6 @@
       bc.innerHTML = `<div class="io-head"><span class="io-label">disk</span><span class="io-rate disk">r:${fmtRate(r)} w:${fmtRate(w)}</span></div>${sparkline(blkRates,'var(--accent)')}`;
     }
 
-    function startPolling(name) {
-      stopPolling();
-      pollCounters(name);
-      counterTimer = setInterval(() => pollCounters(name), 2000);
-    }
-
-    function stopPolling() {
-      if (counterTimer) { clearInterval(counterTimer); counterTimer = null; }
-    }
 
     // snapshots
     async function loadSnaps(name) {
@@ -596,20 +566,43 @@
       const running = vms.filter(v => v.state === 'running').length;
       count.textContent = `${running} / ${vms.length} running`;
 
-      rows.innerHTML = '';
+      // Diff: update existing rows in place, add new, remove gone.
+      const existing = new Map();
+      for (const el of rows.children) existing.set(el.dataset.name, el);
+
+      let prev = null;
       for (const vm of vms) {
-        const div = document.createElement('div');
-        div.className = 'vm-row' + (selected === vm.name ? ' active' : '');
-        div.innerHTML = `
-          <div class="vm-row-left">
-            <div class="vm-row-name">${vm.name}</div>
-            <div class="vm-row-sub">${vm.config.bootMode} · ${vm.config.disks.length}d${vm.ip ? ' · ' + vm.ip : ''}</div>
-          </div>
-          ${stateEl(vm.state)}
-        `;
-        div.addEventListener('click', () => selectVM(vm.name));
-        rows.appendChild(div);
+        const sig = `${vm.state}|${vm.config.bootMode}|${vm.config.disks.length}|${vm.ip || ''}|${selected === vm.name ? 1 : 0}`;
+        let el = existing.get(vm.name);
+
+        if (!el) {
+          el = document.createElement('div');
+          el.dataset.name = vm.name;
+          el.addEventListener('click', () => selectVM(vm.name));
+        } else {
+          existing.delete(vm.name);
+        }
+
+        if (el.dataset.sig !== sig) {
+          el.dataset.sig = sig;
+          el.className = 'vm-row' + (selected === vm.name ? ' active' : '');
+          el.innerHTML = `
+            <div class="vm-row-left">
+              <div class="vm-row-name">${vm.name}</div>
+              <div class="vm-row-sub">${vm.config.bootMode} · ${vm.config.disks.length}d${vm.ip ? ' · ' + vm.ip : ''}</div>
+            </div>
+            ${stateEl(vm.state)}
+          `;
+        }
+
+        // Place in correct order without detaching unchanged neighbours.
+        const targetNext = prev ? prev.nextSibling : rows.firstChild;
+        if (el !== targetNext) rows.insertBefore(el, targetNext);
+        prev = el;
       }
+
+      // Anything left in `existing` was removed from the VM list.
+      for (const el of existing.values()) el.remove();
     }
 
     // detail
@@ -621,7 +614,6 @@
 
       const vm = vms.find(v => v.name === selected);
       if (!vm) {
-        stopPolling();
         inner.innerHTML = emptyStateHtml();
         return;
       }
@@ -676,8 +668,7 @@
         </div>
       `;
 
-      if (alive) startPolling(vm.name);
-      else stopPolling();
+      if (alive) updateIO(vm.name); // paint immediately if we already have history
     }
 
     // create form
@@ -755,7 +746,6 @@
     }
 
     function openCreate() {
-      stopPolling();
       selected = 'create';
       renderList();
       renderDetail();
@@ -768,7 +758,6 @@
     }
 
     function goBack() {
-      stopPolling();
       selected = null;
       document.getElementById('vm-list').classList.remove('hidden');
       document.getElementById('detail-wrap').classList.remove('visible');
@@ -824,19 +813,57 @@
       fetchVMs();
     }
 
-    // data
+    // data — WebSocket pushes vms + counters; we keep fetchVMs as a manual nudge
+    // after actions, but it relies on the same socket and not on HTTP polling.
     async function fetchVMs() {
-      try {
-        const res = await fetch('/api/vms');
-        vms = await res.json();
-        if (selected && selected !== 'create' && !vms.find(v => v.name === selected)) selected = null;
-        renderList();
-        if (selected !== 'create') renderDetail();
-      } catch {}
+      // No-op now; left in place so callers don't need to know. WS push from
+      // the server after each action handler keeps the UI in sync.
     }
 
     async function fetchImages() {
       try { const r = await fetch('/api/images'); images = await r.json(); } catch {}
+    }
+
+    function handleVMsMessage(data) {
+      vms = data;
+      if (selected && selected !== 'create' && !vms.find(v => v.name === selected)) selected = null;
+      renderList();
+      if (selected !== 'create') renderDetail();
+    }
+
+    function handleCountersMessage(ts, data) {
+      for (const [name, counters] of Object.entries(data || {})) {
+        let net_rx = 0, net_tx = 0, blk_r = 0, blk_w = 0;
+        for (const [k, d] of Object.entries(counters)) {
+          if (k.startsWith('_net'))  { net_rx += d.rx_bytes || 0; net_tx += d.tx_bytes || 0; }
+          if (k.startsWith('_disk')) { blk_r  += d.read_bytes || 0; blk_w  += d.write_bytes || 0; }
+        }
+        const hist = history.get(name) || [];
+        hist.push({ ts, net_rx, net_tx, blk_r, blk_w });
+        if (hist.length > HIST) hist.shift();
+        history.set(name, hist);
+      }
+      if (selected && selected !== 'create') updateIO(selected);
+    }
+
+    function connectWS() {
+      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const ws = new WebSocket(`${proto}//${location.host}/ws`);
+
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          if (msg.type === 'vms')      handleVMsMessage(msg.data);
+          else if (msg.type === 'counters') handleCountersMessage(msg.ts, msg.data);
+        } catch {}
+      };
+
+      ws.onclose = () => {
+        // Reconnect with a small backoff so we don't hammer on outage.
+        setTimeout(connectWS, 1500);
+      };
+
+      ws.onerror = () => ws.close();
     }
 
     // theme
@@ -855,8 +882,7 @@
 
     applyTheme(localStorage.getItem('theme') || 'dark');
     fetchImages();
-    fetchVMs();
-    setInterval(fetchVMs, 5000);
+    connectWS();
   </script>
 </body>
 </html>

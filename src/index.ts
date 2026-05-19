@@ -2,6 +2,7 @@ import { config } from "./config";
 import { handleApi } from "./routes/api";
 import { discoverVMs } from "./vm/discover";
 import { seedInstances } from "./vm/manager";
+import { addClient, removeClient, startRefreshLoop } from "./server/ws";
 
 const ui = await Bun.file(`${import.meta.dir}/ui/index.html`).text();
 
@@ -13,9 +14,14 @@ const server = Bun.serve({
   port: config.port,
   hostname: config.host,
 
-  async fetch(req) {
+  async fetch(req, server) {
     const url = new URL(req.url);
     const { pathname } = url;
+
+    if (pathname === "/ws") {
+      if (server.upgrade(req)) return undefined as unknown as Response;
+      return new Response("expected websocket", { status: 400 });
+    }
 
     if (pathname.startsWith("/api/")) {
       const res = await handleApi(req, pathname);
@@ -28,6 +34,13 @@ const server = Bun.serve({
 
     return new Response("not found", { status: 404 });
   },
+
+  websocket: {
+    open(ws) { addClient(ws); },
+    close(ws) { removeClient(ws); },
+    message() { /* server doesn't need client messages today */ },
+  },
 });
 
+startRefreshLoop();
 console.log(`crouton listening on http://${config.host}:${config.port}`);

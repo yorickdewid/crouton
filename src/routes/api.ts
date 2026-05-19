@@ -6,6 +6,7 @@ import { listImages, provisionVM } from "../vm/create";
 import { readVMConfig, writeVMConfig } from "../vm/persist";
 import { macToIp } from "../net/ip";
 import { config } from "../config";
+import { pushVMs } from "../server/ws";
 import type { CreateVMOptions } from "../vm/create";
 import type { VMConfig } from "../types";
 
@@ -30,6 +31,7 @@ export async function handleApi(req: Request, pathname: string): Promise<Respons
       const opts = (await req.json()) as CreateVMOptions;
       const vmConfig = await provisionVM(opts);
       const instance = await startVM(vmConfig);
+      pushVMs();
       return json(instance, 201);
     } catch (e: unknown) {
       return json({ error: (e as Error).message }, 400);
@@ -63,6 +65,7 @@ export async function handleApi(req: Request, pathname: string): Promise<Respons
     if (req.method === "DELETE") {
       try {
         await deleteVM(name);
+        pushVMs();
         return json({ ok: true });
       } catch (e: unknown) {
         return json({ error: (e as Error).message }, 400);
@@ -90,6 +93,7 @@ export async function handleApi(req: Request, pathname: string): Promise<Respons
         await writeVMConfig(cfg);
       }
       const instance = await startVM(cfg);
+      pushVMs();
       return json(instance);
     } catch (e: unknown) {
       return json({ error: (e as Error).message }, 400);
@@ -108,6 +112,7 @@ export async function handleApi(req: Request, pathname: string): Promise<Respons
         try { await vmShutdown(name); }
         catch { await stopVM(name); }
       }
+      pushVMs();
       return json({ ok: true });
     } catch (e: unknown) {
       return json({ error: (e as Error).message }, 400);

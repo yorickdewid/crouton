@@ -399,509 +399,521 @@
   </style>
 </head>
 <body>
-  <header>
-    <button class="back-btn" id="back-btn" onclick="goBack()">← back</button>
-    <h1>crouton</h1>
-    <span class="sep">/</span>
-    <span class="subtitle" id="header-sub">cloud hypervisor</span>
-    <span class="spacer"></span>
-    <span id="vm-count" style="color:var(--muted);font-size:12px;margin-right:12px"></span>
-    <button class="theme-toggle" id="theme-toggle" onclick="toggleTheme()">☾</button>
-  </header>
+  <div id="app"></div>
 
-  <div class="layout">
-    <div class="vm-list" id="vm-list">
-      <div class="list-top">
-        <span>VMs</span>
-        <button class="new-btn" onclick="openCreate()">+ new</button>
-      </div>
-      <div class="vm-rows" id="vm-rows"></div>
-    </div>
+  <script type="module">
+    import { render } from "https://esm.sh/preact@10.22.0";
+    import { useState, useEffect, useRef, useCallback, useMemo } from "https://esm.sh/preact@10.22.0/hooks";
+    import { html } from "https://esm.sh/htm@3.1.1/preact?deps=preact@10.22.0";
 
-    <div class="toasts" id="toasts"></div>
-
-    <div class="detail-wrap" id="detail-wrap">
-      <div id="detail-inner"><div class="empty-state"><pre class="empty-art">   ╭──────╮
-   │ ▒▒▒▒ │
-   │ ▒▒▒▒ │
-   ╰──────╯
-  crouton</pre><div class="empty-msg">pick a vm <span class="cursor">▎</span></div></div></div>
-    </div>
-  </div>
-
-  <script>
-    let vms = [], images = [], selected = null;
-    const history = new Map();
+    // ── constants ────────────────────────────────────────────────────────
     const HIST = 40;
+    const ACTION_VERBS = {
+      reboot: "rebooting",
+      pause: "paused",
+      resume: "resumed",
+      shutdown: "shutting down",
+    };
+
+    // ── helpers ──────────────────────────────────────────────────────────
+    function fmtRate(bps) {
+      if (bps == null || isNaN(bps) || bps < 0) return "0 B/s";
+      if (bps < 1024) return bps.toFixed(0) + " B/s";
+      if (bps < 1_048_576) return (bps / 1024).toFixed(1) + " KB/s";
+      return (bps / 1_048_576).toFixed(2) + " MB/s";
+    }
+
+    /** Mutates `historyMap` in place. */
+    function ingestCounters(historyMap, ts, data) {
+      for (const [name, counters] of Object.entries(data || {})) {
+        let net_rx = 0, net_tx = 0, blk_r = 0, blk_w = 0;
+        for (const [k, d] of Object.entries(counters)) {
+          if (k.startsWith("_net")) { net_rx += d.rx_bytes || 0; net_tx += d.tx_bytes || 0; }
+          if (k.startsWith("_disk")) { blk_r += d.read_bytes || 0; blk_w += d.write_bytes || 0; }
+        }
+        const hist = historyMap.get(name) ?? [];
+        hist.push({ ts, net_rx, net_tx, blk_r, blk_w });
+        if (hist.length > HIST) hist.shift();
+        historyMap.set(name, hist);
+      }
+    }
+
+    function ratesFrom(history, name) {
+      const h = history.get(name) ?? [];
+      if (h.length < 2) return { net: [], blk: [], current: { rx: 0, tx: 0, r: 0, w: 0 } };
+
+      const net = [], blk = [];
+      for (let i = 1; i < h.length; i++) {
+        const dt = (h[i].ts - h[i - 1].ts) / 1000;
+        const factor = dt > 0 ? 1 / dt : 0;
+        net.push(Math.max(0, (h[i].net_rx - h[i - 1].net_rx) * factor + (h[i].net_tx - h[i - 1].net_tx) * factor));
+        blk.push(Math.max(0, (h[i].blk_r - h[i - 1].blk_r) * factor + (h[i].blk_w - h[i - 1].blk_w) * factor));
+      }
+
+      const last = h[h.length - 1], prev = h[h.length - 2];
+      const dt = (last.ts - prev.ts) / 1000 || 1;
+      const current = {
+        rx: Math.max(0, (last.net_rx - prev.net_rx) / dt),
+        tx: Math.max(0, (last.net_tx - prev.net_tx) / dt),
+        r: Math.max(0, (last.blk_r - prev.blk_r) / dt),
+        w: Math.max(0, (last.blk_w - prev.blk_w) / dt),
+      };
+      return { net, blk, current };
+    }
 
     const isMobile = () => window.innerWidth <= 700;
 
-    const emptyStateHtml = () => `<div class="empty-state"><pre class="empty-art">   ╭──────╮
-   │ ▒▒▒▒ │
-   │ ▒▒▒▒ │
-   ╰──────╯
-  crouton</pre><div class="empty-msg">pick a vm <span class="cursor">▎</span></div></div>`;
-
-    // toasts
-    function toast(msg, kind = 'ok') {
-      const t = document.createElement('div');
-      t.className = 'toast' + (kind === 'err' ? ' err' : '');
-      t.textContent = msg;
-      document.getElementById('toasts').appendChild(t);
-      setTimeout(() => t.classList.add('fade'), 3500);
-      setTimeout(() => t.remove(), 4000);
-    }
-
-    // run an action with button feedback (busy spinner + success/error flash)
-    async function withButton(btn, fn) {
-      if (!btn) return fn();
-      btn.classList.add('busy');
+    async function withButton(target, fn) {
+      const btn = target instanceof HTMLElement ? target : target?.currentTarget;
+      btn?.classList.add("busy");
       try {
         const result = await fn();
-        btn.classList.remove('busy');
-        btn.classList.add('flash-ok');
-        setTimeout(() => btn.classList.remove('flash-ok'), 600);
+        btn?.classList.remove("busy");
+        btn?.classList.add("flash-ok");
+        setTimeout(() => btn?.classList.remove("flash-ok"), 600);
         return result;
       } catch (e) {
-        btn.classList.remove('busy');
-        btn.classList.add('flash-err');
-        setTimeout(() => btn.classList.remove('flash-err'), 600);
+        btn?.classList.remove("busy");
+        btn?.classList.add("flash-err");
+        setTimeout(() => btn?.classList.remove("flash-err"), 600);
         throw e;
       }
     }
 
-    // formatting
-    function fmtRate(bps) {
-      if (bps == null || isNaN(bps) || bps < 0) return '0 B/s';
-      if (bps < 1024) return bps.toFixed(0) + ' B/s';
-      if (bps < 1048576) return (bps / 1024).toFixed(1) + ' KB/s';
-      return (bps / 1048576).toFixed(2) + ' MB/s';
+    // ── components ───────────────────────────────────────────────────────
+
+    function StateBadge({ state }) {
+      return html`
+        <span class="badge"><span class=${"dot " + state}></span>${state}</span>
+      `;
     }
 
-    function stateEl(state) {
-      return `<span class="badge"><span class="dot ${state}"></span>${state}</span>`;
-    }
-
-    // sparkline
-    function sparkline(vals, color) {
+    function Sparkline({ values, color }) {
       const W = 200, H = 40;
-      if (vals.length < 2) return `<svg class="spark" viewBox="0 0 ${W} ${H}"><polyline points="" stroke="${color}"/></svg>`;
-      const max = Math.max(...vals, 1);
-      const pts = vals.map((v, i) => `${(i / (vals.length - 1)) * W},${H - (v / max) * H}`).join(' ');
+      if (values.length < 2) {
+        return html`<svg class="spark" viewBox=${`0 0 ${W} ${H}`}><polyline points="" stroke=${color} /></svg>`;
+      }
+      const max = Math.max(...values, 1);
+      const pts = values.map((v, i) => `${(i / (values.length - 1)) * W},${H - (v / max) * H}`).join(" ");
       const fill = `0,${H} ${pts} ${W},${H}`;
-      return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
-        <polygon class="spark-fill" points="${fill}" fill="${color}"/>
-        <polyline points="${pts}" stroke="${color}"/></svg>`;
+      return html`
+        <svg class="spark" viewBox=${`0 0 ${W} ${H}`} preserveAspectRatio="none">
+          <polygon class="spark-fill" points=${fill} fill=${color} />
+          <polyline points=${pts} stroke=${color} />
+        </svg>
+      `;
     }
 
-    // counters — populated by WS push (handleCountersMessage)
-    function rates(name, key) {
-      const h = history.get(name) || [];
-      if (h.length < 2) return [];
-      const out = [];
-      for (let i = 1; i < h.length; i++) {
-        const dt = (h[i].ts - h[i-1].ts) / 1000;
-        out.push(dt > 0 ? Math.max(0, (h[i][key] - h[i-1][key]) / dt) : 0);
+    function Header({ subtitle, vmCount, running, theme, onBack, onToggleTheme, showBack }) {
+      return html`
+        <header>
+          ${showBack ? html`<button class="back-btn" style="display:inline" onClick=${onBack}>← back</button>` : null}
+          <h1>crouton</h1>
+          <span class="sep">/</span>
+          <span class="subtitle">${subtitle}</span>
+          <span class="spacer"></span>
+          <span style="color:var(--muted);font-size:12px;margin-right:12px">
+            ${vmCount > 0 ? `${running} / ${vmCount} running` : ""}
+          </span>
+          <button class="theme-toggle" onClick=${onToggleTheme}>${theme === "dark" ? "☾" : "☀"}</button>
+        </header>
+      `;
+    }
+
+    function VMRow({ vm, active, onClick }) {
+      const sub = `${vm.config.bootMode} · ${vm.config.disks.length}d${vm.ip ? " · " + vm.ip : ""}`;
+      return html`
+        <div class=${"vm-row" + (active ? " active" : "")} onClick=${onClick}>
+          <div class="vm-row-left">
+            <div class="vm-row-name">${vm.name}</div>
+            <div class="vm-row-sub">${sub}</div>
+          </div>
+          <${StateBadge} state=${vm.state} />
+        </div>
+      `;
+    }
+
+    function VMList({ vms, selected, onSelect, onNew, hidden }) {
+      return html`
+        <div class=${"vm-list" + (hidden ? " hidden" : "")}>
+          <div class="list-top">
+            <span>VMs</span>
+            <button class="new-btn" onClick=${onNew}>+ new</button>
+          </div>
+          <div class="vm-rows">
+            ${vms.map(vm => html`
+              <${VMRow}
+                key=${vm.name}
+                vm=${vm}
+                active=${selected === vm.name}
+                onClick=${() => onSelect(vm.name)} />
+            `)}
+          </div>
+        </div>
+      `;
+    }
+
+    const EMPTY_ART = `   ╭──────╮
+   │ ▒▒▒▒ │
+   │ ▒▒▒▒ │
+   ╰──────╯
+  crouton`;
+
+    function EmptyDetail() {
+      return html`
+        <div class="empty-state">
+          <pre class="empty-art">${EMPTY_ART}</pre>
+          <div class="empty-msg">pick a vm <span class="cursor">▎</span></div>
+        </div>
+      `;
+    }
+
+    function IOCard({ label, rateText, values, color }) {
+      return html`
+        <div class="io-card">
+          <div class="io-head">
+            <span class="io-label">${label}</span>
+            <span class=${"io-rate " + (label === "network" ? "net" : "disk")}>${rateText}</span>
+          </div>
+          <${Sparkline} values=${values} color=${color} />
+        </div>
+      `;
+    }
+
+    function ActionRow({ vm, onAct, onStart, onClone, onDelete, onSnap }) {
+      const alive = vm.state === "running";
+      if (alive) {
+        return html`
+          <div class="act-row top">
+            <button class="btn" onClick=${e => onAct(vm.name, "reboot", e)}>reboot</button>
+            <button class="btn" onClick=${e => onAct(vm.name, "pause", e)}>pause</button>
+            <button class="btn" onClick=${e => onSnap(vm.name, e)}>snapshot</button>
+            <button class="btn red" onClick=${e => onAct(vm.name, "shutdown", e)}>shutdown</button>
+          </div>
+        `;
       }
-      return out;
+      return html`
+        <div class="act-row top">
+          <button class="btn" onClick=${e => onStart(vm.name, e)}>start</button>
+          <button class="btn" onClick=${e => onClone(vm.name, e)}>clone</button>
+          <button class="btn red" onClick=${e => onDelete(vm.name, e)}>delete</button>
+        </div>
+      `;
     }
 
-    function updateIO(name) {
-      if (selected !== name) return;
-      const h = history.get(name) || [];
-      if (h.length < 2) return;
-      const last = h[h.length - 1], prev = h[h.length - 2];
-      const dt = (last.ts - prev.ts) / 1000 || 1;
-      const rx  = Math.max(0, (last.net_rx - prev.net_rx) / dt);
-      const tx  = Math.max(0, (last.net_tx - prev.net_tx) / dt);
-      const r   = Math.max(0, (last.blk_r  - prev.blk_r)  / dt);
-      const w   = Math.max(0, (last.blk_w  - prev.blk_w)  / dt);
+    function VMDetail({ vm, history, handlers }) {
+      const alive = vm.state === "running";
+      const r = useMemo(() => alive ? ratesFrom(history, vm.name) : null, [history, vm.name, alive, vm.snapshots?.length]);
 
-      const netRates = rates(name, 'net_rx').map((v,i) => v + (rates(name,'net_tx')[i]||0));
-      const blkRates = rates(name, 'blk_r').map((v,i)  => v + (rates(name,'blk_w')[i]||0));
-
-      const nc = document.getElementById('io-net');
-      const bc = document.getElementById('io-blk');
-      if (!nc || !bc) return;
-
-      nc.innerHTML = `<div class="io-head"><span class="io-label">network</span><span class="io-rate net">↓${fmtRate(rx)} ↑${fmtRate(tx)}</span></div>${sparkline(netRates,'var(--blue)')}`;
-      bc.innerHTML = `<div class="io-head"><span class="io-label">disk</span><span class="io-rate disk">r:${fmtRate(r)} w:${fmtRate(w)}</span></div>${sparkline(blkRates,'var(--accent)')}`;
-    }
-
-
-    // snapshots
-    async function loadSnaps(name) {
-      try { const r = await fetch(`/api/vms/${name}/snapshots`); return r.ok ? r.json() : []; } catch { return []; }
-    }
-
-    async function takeSnap(name) {
-      const btn = document.getElementById('snap-btn');
-      try {
-        await withButton(btn, async () => {
-          const r = await fetch(`/api/vms/${name}/snapshots`, { method: 'POST' });
-          const d = await r.json();
-          if (!r.ok) throw new Error(d.error || 'snapshot failed');
-          await refreshSnaps(name);
-          toast(`📸 snapshot saved — ${d.name}`);
-        });
-      } catch (e) { toast(e.message, 'err'); }
-    }
-
-    async function refreshSnaps(name) {
-      const snaps = await loadSnaps(name);
-      const el = document.getElementById('snap-list');
-      if (!el) return;
-      el.innerHTML = renderSnapList(snaps);
-    }
-
-    function renderSnapList(snaps) {
-      if (!snaps.length) return '<div class="snap-none">no snapshots yet</div>';
-      return snaps.map(s => `<div class="snap-row"><span>📸 ${s.replace(/_/g,' ')}</span></div>`).join('');
-    }
-
-    // list
-    function renderList() {
-      const rows = document.getElementById('vm-rows');
-      const count = document.getElementById('vm-count');
-      const running = vms.filter(v => v.state === 'running').length;
-      count.textContent = `${running} / ${vms.length} running`;
-
-      // Diff: update existing rows in place, add new, remove gone.
-      const existing = new Map();
-      for (const el of rows.children) existing.set(el.dataset.name, el);
-
-      let prev = null;
-      for (const vm of vms) {
-        const sig = `${vm.state}|${vm.config.bootMode}|${vm.config.disks.length}|${vm.ip || ''}|${selected === vm.name ? 1 : 0}`;
-        let el = existing.get(vm.name);
-
-        if (!el) {
-          el = document.createElement('div');
-          el.dataset.name = vm.name;
-          el.addEventListener('click', () => selectVM(vm.name));
-        } else {
-          existing.delete(vm.name);
-        }
-
-        if (el.dataset.sig !== sig) {
-          el.dataset.sig = sig;
-          el.className = 'vm-row' + (selected === vm.name ? ' active' : '');
-          el.innerHTML = `
-            <div class="vm-row-left">
-              <div class="vm-row-name">${vm.name}</div>
-              <div class="vm-row-sub">${vm.config.bootMode} · ${vm.config.disks.length}d${vm.ip ? ' · ' + vm.ip : ''}</div>
-            </div>
-            ${stateEl(vm.state)}
-          `;
-        }
-
-        // Place in correct order without detaching unchanged neighbours.
-        const targetNext = prev ? prev.nextSibling : rows.firstChild;
-        if (el !== targetNext) rows.insertBefore(el, targetNext);
-        prev = el;
-      }
-
-      // Anything left in `existing` was removed from the VM list.
-      for (const el of existing.values()) el.remove();
-    }
-
-    // detail
-    async function renderDetail() {
-      const inner = document.getElementById('detail-inner');
-      const wrap  = document.getElementById('detail-wrap');
-
-      if (selected === 'create') { renderForm(inner, wrap); return; }
-
-      const vm = vms.find(v => v.name === selected);
-      if (!vm) {
-        inner.innerHTML = emptyStateHtml();
-        return;
-      }
-
-      const alive = vm.state === 'running';
-      const snaps = alive ? await loadSnaps(vm.name) : [];
       const specs = [
-        vm.config.cpus   ? `${vm.config.cpus} vcpu`   : null,
+        vm.config.cpus ? `${vm.config.cpus} vcpu` : null,
         vm.config.memoryMb ? `${vm.config.memoryMb} MB` : null,
         vm.config.bootMode,
-      ].filter(Boolean).join(' · ');
+      ].filter(Boolean).join(" · ");
 
-      inner.innerHTML = `
+      return html`
         <div class="detail">
           <div class="detail-head">
             <span class="detail-name">${vm.name}</span>
-            ${stateEl(vm.state)}
+            <${StateBadge} state=${vm.state} />
           </div>
           <div class="detail-meta">${specs}</div>
           ${vm.ip
-            ? `<div class="detail-ip">${vm.ip}<span style="color:var(--muted);font-size:12px;margin-left:14px">${vm.mac}</span></div>`
-            : `<div class="detail-ip none">${vm.mac}</div>`
-          }
+            ? html`<div class="detail-ip">${vm.ip}<span style="color:var(--muted);font-size:12px;margin-left:14px">${vm.mac}</span></div>`
+            : html`<div class="detail-ip none">${vm.mac}</div>`}
 
-          <div class="act-row top">
-            ${alive
-              ? `<button class="btn" onclick="act('${vm.name}','reboot',event)">reboot</button>
-                 <button class="btn" onclick="act('${vm.name}','pause',event)">pause</button>
-                 <button class="btn" id="snap-btn" onclick="takeSnap('${vm.name}')">snapshot</button>
-                 <button class="btn red" onclick="act('${vm.name}','shutdown',event)">shutdown</button>`
-              : `<button class="btn" onclick="startVm('${vm.name}',event)">start</button>
-                 <button class="btn" onclick="cloneVm('${vm.name}',event)">clone</button>
-                 <button class="btn red" onclick="deleteVm('${vm.name}',event)">delete</button>`
-            }
-          </div>
+          <${ActionRow} vm=${vm} ...${handlers} />
 
-          ${alive ? `
-          <hr class="divider">
-          <div class="io-row">
-            <div class="io-card" id="io-net"><div class="io-head"><span class="io-label">network</span><span class="io-rate net">—</span></div>${sparkline([],'var(--blue)')}</div>
-            <div class="io-card" id="io-blk"><div class="io-head"><span class="io-label">disk</span><span class="io-rate disk">—</span></div>${sparkline([],'var(--accent)')}</div>
-          </div>` : ''}
+          ${alive && r ? html`
+            <hr class="divider" />
+            <div class="io-row">
+              <${IOCard}
+                label="network"
+                rateText=${html`↓${fmtRate(r.current.rx)} ↑${fmtRate(r.current.tx)}`}
+                values=${r.net}
+                color="var(--blue)" />
+              <${IOCard}
+                label="disk"
+                rateText=${`r:${fmtRate(r.current.r)} w:${fmtRate(r.current.w)}`}
+                values=${r.blk}
+                color="var(--accent)" />
+            </div>
+          ` : null}
 
-          <hr class="divider">
+          <hr class="divider" />
           <div class="sh">Disks</div>
-          <div id="disk-list">
-            ${vm.config.disks.map((d,i) => `<div class="disk-row"><span class="disk-idx">disk${i}</span><span>${d}</span></div>`).join('')}
+          <div>
+            ${vm.config.disks.map((d, i) => html`
+              <div class="disk-row" key=${i}>
+                <span class="disk-idx">disk${i}</span>
+                <span>${d}</span>
+              </div>
+            `)}
           </div>
 
-          <hr class="divider">
+          <hr class="divider" />
           <div class="sh">Snapshots</div>
-          <div id="snap-list">${renderSnapList(snaps)}</div>
+          <div>
+            ${(vm.snapshots?.length ?? 0) === 0
+              ? html`<div class="snap-none">no snapshots yet</div>`
+              : vm.snapshots.map(s => html`<div class="snap-row" key=${s}><span>📸 ${s.replace(/_/g, " ")}</span></div>`)}
+          </div>
         </div>
       `;
-
-      if (alive) updateIO(vm.name); // paint immediately if we already have history
     }
 
-    // create form
-    function renderForm(inner, wrap) {
-      const opts = images.map(i => `<option value="${i}">${i}</option>`).join('');
-      inner.innerHTML = `
+    function CreateForm({ images, onSubmit, onCancel }) {
+      const [name, setName] = useState("");
+      const [image, setImage] = useState(images[0] ?? "");
+      const [cpus, setCpus] = useState(2);
+      const [memory, setMemory] = useState(2048);
+      const [disk, setDisk] = useState(25);
+      const [error, setError] = useState("");
+      const [busy, setBusy] = useState(false);
+
+      useEffect(() => { if (!image && images.length) setImage(images[0]); }, [images]);
+
+      const submit = async () => {
+        setError("");
+        if (!name.trim()) { setError("Name is required."); return; }
+        if (!image) { setError("Select a base image."); return; }
+        setBusy(true);
+        try {
+          await onSubmit({ name: name.trim(), image, cpus, memoryMb: memory, diskSizeGb: disk });
+        } catch (e) {
+          setError(e.message);
+          setBusy(false);
+        }
+      };
+
+      return html`
         <div class="form-wrap">
           <div class="form-title">New VM</div>
-          <div class="form-error" id="form-error"></div>
+          <div class="form-error ${error ? "visible" : ""}" style=${error ? null : "display:none"}>${error}</div>
           <div class="field">
             <label>Name</label>
-            <input id="f-name" type="text" placeholder="my-vm" autocomplete="off" spellcheck="false">
+            <input type="text" placeholder="my-vm" autocomplete="off" spellcheck=${false}
+              value=${name} onInput=${e => setName(e.target.value)} />
           </div>
           <div class="field">
             <label>Base image</label>
-            <select id="f-image">${opts || '<option value="">no images found</option>'}</select>
+            <select value=${image} onChange=${e => setImage(e.target.value)}>
+              ${images.length === 0
+                ? html`<option value="">no images found</option>`
+                : images.map(i => html`<option key=${i} value=${i}>${i}</option>`)}
+            </select>
           </div>
           <div class="field-row">
-            <div class="field"><label>CPUs</label><input id="f-cpus" type="number" value="2" min="1" max="64"></div>
-            <div class="field"><label>Memory (MB)</label><input id="f-memory" type="number" value="2048" min="256" step="256"></div>
+            <div class="field">
+              <label>CPUs</label>
+              <input type="number" min="1" max="64" value=${cpus} onInput=${e => setCpus(+e.target.value)} />
+            </div>
+            <div class="field">
+              <label>Memory (MB)</label>
+              <input type="number" min="256" step="256" value=${memory} onInput=${e => setMemory(+e.target.value)} />
+            </div>
           </div>
-          <div class="field"><label>Disk size (GB)</label><input id="f-disk" type="number" value="25" min="1"></div>
+          <div class="field">
+            <label>Disk size (GB)</label>
+            <input type="number" min="1" value=${disk} onInput=${e => setDisk(+e.target.value)} />
+          </div>
           <div class="act-row">
-            <button class="btn" id="create-btn" onclick="submitCreate()">Create & start</button>
-            <button class="btn" onclick="goBack()">Cancel</button>
+            <button class="btn" disabled=${busy} onClick=${submit}>${busy ? "Provisioning…" : "Create & start"}</button>
+            <button class="btn" onClick=${onCancel}>Cancel</button>
           </div>
         </div>
       `;
     }
 
-    async function submitCreate() {
-      const name     = document.getElementById('f-name').value.trim();
-      const image    = document.getElementById('f-image').value;
-      const cpus     = parseInt(document.getElementById('f-cpus').value);
-      const memoryMb = parseInt(document.getElementById('f-memory').value);
-      const diskSizeGb = parseInt(document.getElementById('f-disk').value);
-      const err = document.getElementById('form-error');
+    function Toast({ msg, kind, fade }) {
+      return html`<div class=${"toast" + (kind === "err" ? " err" : "") + (fade ? " fade" : "")}>${msg}</div>`;
+    }
 
-      if (!name)  { err.textContent = 'Name is required.'; return; }
-      if (!image) { err.textContent = 'Select a base image.'; return; }
-      err.textContent = '';
+    function ToastList({ toasts }) {
+      return html`
+        <div class="toasts">
+          ${toasts.map(t => html`<${Toast} key=${t.id} ...${t} />`)}
+        </div>
+      `;
+    }
 
-      const btn = document.getElementById('create-btn');
-      btn.disabled = true; btn.textContent = 'Provisioning…';
+    // ── root ─────────────────────────────────────────────────────────────
+    function App() {
+      const [vms, setVms] = useState([]);
+      const [images, setImages] = useState([]);
+      const [selected, setSelected] = useState(null);
+      const [theme, setTheme] = useState(localStorage.getItem("theme") || "dark");
+      const [toasts, setToasts] = useState([]);
+      const [, setTick] = useState(0); // forces a re-render when counters arrive
+      const history = useRef(new Map());
 
-      try {
-        const res = await fetch('/api/vms', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ name, image, cpus, memoryMb, diskSizeGb }),
+      // ── theme ──
+      useEffect(() => {
+        if (theme === "light") document.documentElement.setAttribute("data-theme", "light");
+        else document.documentElement.removeAttribute("data-theme");
+        localStorage.setItem("theme", theme);
+      }, [theme]);
+
+      // ── images ──
+      useEffect(() => {
+        fetch("/api/images").then(r => r.json()).then(setImages).catch(() => {});
+      }, []);
+
+      // ── ws ──
+      useEffect(() => {
+        let ws, alive = true;
+        const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        const connect = () => {
+          if (!alive) return;
+          ws = new WebSocket(`${proto}//${location.host}/ws`);
+          ws.onmessage = e => {
+            try {
+              const msg = JSON.parse(e.data);
+              if (msg.type === "vms") setVms(msg.data);
+              else if (msg.type === "counters") {
+                ingestCounters(history.current, msg.ts, msg.data);
+                setTick(t => t + 1);
+              }
+            } catch {}
+          };
+          ws.onclose = () => { if (alive) setTimeout(connect, 1500); };
+          ws.onerror = () => ws.close();
+        };
+        connect();
+        return () => { alive = false; ws?.close(); };
+      }, []);
+
+      // Drop selection if the VM disappears (e.g. delete)
+      useEffect(() => {
+        if (selected && selected !== "create" && !vms.find(v => v.name === selected)) {
+          setSelected(null);
+        }
+      }, [vms, selected]);
+
+      // ── toasts ──
+      const toast = useCallback((msg, kind = "ok") => {
+        const id = Date.now() + Math.random();
+        setToasts(ts => [...ts, { id, msg, kind, fade: false }]);
+        setTimeout(() => setToasts(ts => ts.map(t => t.id === id ? { ...t, fade: true } : t)), 3500);
+        setTimeout(() => setToasts(ts => ts.filter(t => t.id !== id)), 4000);
+      }, []);
+
+      // ── action handlers ──
+      const onAct = useCallback(async (name, action, ev) => {
+        try {
+          await withButton(ev, async () => {
+            const res = await fetch(`/api/vms/${name}/${action}`, { method: "PUT" });
+            if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "failed"); }
+            toast(`${name} — ${ACTION_VERBS[action] || action}`);
+          });
+        } catch (e) { toast(e.message, "err"); }
+      }, [toast]);
+
+      const onStart = useCallback(async (name, ev) => {
+        try {
+          await withButton(ev, async () => {
+            const res = await fetch(`/api/vms/${name}/start`, { method: "POST" });
+            if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "failed to start"); }
+            toast(`🚀 ${name} starting…`);
+          });
+        } catch (e) { toast(e.message, "err"); }
+      }, [toast]);
+
+      const onDelete = useCallback(async (name, ev) => {
+        if (!confirm(`Delete VM "${name}"?\nThis removes its disk and config permanently.`)) return;
+        try {
+          await withButton(ev, async () => {
+            const res = await fetch(`/api/vms/${name}`, { method: "DELETE" });
+            if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "failed"); }
+            toast(`💀 ${name} deleted`);
+          });
+          setSelected(null);
+        } catch (e) { toast(e.message, "err"); }
+      }, [toast]);
+
+      const onClone = useCallback(async (sourceName, ev) => {
+        const targetName = prompt(`Clone "${sourceName}" — name for the new VM:`);
+        if (!targetName) return;
+        try {
+          await withButton(ev, async () => {
+            const res = await fetch(`/api/vms/${sourceName}/clone`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: targetName.trim() }),
+            });
+            if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "clone failed"); }
+            toast(`🍞 ${sourceName} → ${targetName}`);
+            setSelected(targetName.trim());
+          });
+        } catch (e) { toast(e.message, "err"); }
+      }, [toast]);
+
+      const onSnap = useCallback(async (name, ev) => {
+        try {
+          await withButton(ev, async () => {
+            const res = await fetch(`/api/vms/${name}/snapshots`, { method: "POST" });
+            const d = await res.json();
+            if (!res.ok) throw new Error(d.error || "snapshot failed");
+            toast(`📸 snapshot saved — ${d.name}`);
+          });
+        } catch (e) { toast(e.message, "err"); }
+      }, [toast]);
+
+      const onCreate = useCallback(async (body) => {
+        const res = await fetch("/api/vms", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
         });
         const data = await res.json();
-        if (!res.ok) { err.textContent = data.error || 'Failed.'; btn.disabled = false; btn.textContent = 'Create & start'; return; }
-        toast(`🥖 ${name} is rising`);
-        selected = name;
-        await fetchVMs();
-        if (isMobile()) document.getElementById('header-sub').textContent = name;
-      } catch (e) {
-        err.textContent = e.message;
-        btn.disabled = false; btn.textContent = 'Create & start';
-      }
+        if (!res.ok) throw new Error(data.error || "Failed.");
+        toast(`🥖 ${body.name} is rising`);
+        setSelected(body.name);
+      }, [toast]);
+
+      // ── derived ──
+      const vm = useMemo(
+        () => (selected && selected !== "create" ? vms.find(v => v.name === selected) ?? null : null),
+        [vms, selected],
+      );
+      const running = vms.filter(v => v.state === "running").length;
+      const subtitle = vm ? vm.name : selected === "create" ? "New VM" : "cloud hypervisor";
+
+      const mobile = isMobile();
+      const handlers = { onAct, onStart, onClone, onDelete, onSnap };
+
+      return html`
+        <${Header}
+          subtitle=${subtitle}
+          vmCount=${vms.length}
+          running=${running}
+          theme=${theme}
+          showBack=${mobile && !!selected}
+          onBack=${() => setSelected(null)}
+          onToggleTheme=${() => setTheme(t => t === "dark" ? "light" : "dark")} />
+
+        <div class="layout">
+          <${VMList}
+            vms=${vms}
+            selected=${selected}
+            hidden=${mobile && !!selected}
+            onSelect=${setSelected}
+            onNew=${() => setSelected("create")} />
+
+          <${ToastList} toasts=${toasts} />
+
+          <div class=${"detail-wrap" + (mobile && selected ? " visible" : "")}>
+            ${selected === "create"
+              ? html`<${CreateForm} images=${images} onSubmit=${onCreate} onCancel=${() => setSelected(null)} />`
+              : vm
+                ? html`<${VMDetail} vm=${vm} history=${history.current} handlers=${handlers} />`
+                : html`<${EmptyDetail} />`}
+          </div>
+        </div>
+      `;
     }
 
-    // navigation
-    function selectVM(name) {
-      selected = name;
-      renderList();
-      renderDetail();
-      if (isMobile()) {
-        document.getElementById('vm-list').classList.add('hidden');
-        document.getElementById('detail-wrap').classList.add('visible');
-        document.getElementById('back-btn').style.display = 'inline';
-        document.getElementById('header-sub').textContent = name;
-      }
-    }
-
-    function openCreate() {
-      selected = 'create';
-      renderList();
-      renderDetail();
-      if (isMobile()) {
-        document.getElementById('vm-list').classList.add('hidden');
-        document.getElementById('detail-wrap').classList.add('visible');
-        document.getElementById('back-btn').style.display = 'inline';
-        document.getElementById('header-sub').textContent = 'New VM';
-      }
-    }
-
-    function goBack() {
-      selected = null;
-      document.getElementById('vm-list').classList.remove('hidden');
-      document.getElementById('detail-wrap').classList.remove('visible');
-      document.getElementById('back-btn').style.display = 'none';
-      document.getElementById('header-sub').textContent = 'cloud hypervisor';
-      renderList();
-      renderDetail();
-    }
-
-    const ACTION_VERBS = {
-      reboot: 'rebooting',
-      pause: 'paused',
-      resume: 'resumed',
-      shutdown: 'shutting down',
-    };
-
-    async function act(name, action, ev) {
-      const btn = ev?.currentTarget;
-      try {
-        await withButton(btn, async () => {
-          const res = await fetch(`/api/vms/${name}/${action}`, { method: 'PUT' });
-          if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'failed'); }
-          toast(`${name} — ${ACTION_VERBS[action] || action}`);
-        });
-      } catch (e) { toast(e.message, 'err'); }
-      fetchVMs();
-    }
-
-    async function startVm(name, ev) {
-      const btn = ev?.currentTarget;
-      try {
-        await withButton(btn, async () => {
-          const res = await fetch(`/api/vms/${name}/start`, { method: 'POST' });
-          if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'failed to start'); }
-          toast(`🚀 ${name} starting…`);
-        });
-      } catch (e) { toast(e.message, 'err'); }
-      fetchVMs();
-    }
-
-    async function cloneVm(sourceName, ev) {
-      const targetName = prompt(`Clone "${sourceName}" — name for the new VM:`);
-      if (!targetName) return;
-      const btn = ev?.currentTarget;
-      try {
-        await withButton(btn, async () => {
-          const res = await fetch(`/api/vms/${sourceName}/clone`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ name: targetName.trim() }),
-          });
-          if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'clone failed'); }
-          toast(`🍞 ${sourceName} → ${targetName}`);
-        });
-        selected = targetName.trim();
-      } catch (e) { toast(e.message, 'err'); }
-    }
-
-    async function deleteVm(name, ev) {
-      if (!confirm(`Delete VM "${name}"?\nThis removes its disk and config permanently.`)) return;
-      const btn = ev?.currentTarget;
-      try {
-        await withButton(btn, async () => {
-          const res = await fetch(`/api/vms/${name}`, { method: 'DELETE' });
-          if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'failed'); }
-          toast(`💀 ${name} deleted`);
-        });
-      } catch (e) { toast(e.message, 'err'); return; }
-      selected = null;
-      goBack();
-      fetchVMs();
-    }
-
-    // data — WebSocket pushes vms + counters; we keep fetchVMs as a manual nudge
-    // after actions, but it relies on the same socket and not on HTTP polling.
-    async function fetchVMs() {
-      // No-op now; left in place so callers don't need to know. WS push from
-      // the server after each action handler keeps the UI in sync.
-    }
-
-    async function fetchImages() {
-      try { const r = await fetch('/api/images'); images = await r.json(); } catch {}
-    }
-
-    function handleVMsMessage(data) {
-      vms = data;
-      if (selected && selected !== 'create' && !vms.find(v => v.name === selected)) selected = null;
-      renderList();
-      if (selected !== 'create') renderDetail();
-    }
-
-    function handleCountersMessage(ts, data) {
-      for (const [name, counters] of Object.entries(data || {})) {
-        let net_rx = 0, net_tx = 0, blk_r = 0, blk_w = 0;
-        for (const [k, d] of Object.entries(counters)) {
-          if (k.startsWith('_net'))  { net_rx += d.rx_bytes || 0; net_tx += d.tx_bytes || 0; }
-          if (k.startsWith('_disk')) { blk_r  += d.read_bytes || 0; blk_w  += d.write_bytes || 0; }
-        }
-        const hist = history.get(name) || [];
-        hist.push({ ts, net_rx, net_tx, blk_r, blk_w });
-        if (hist.length > HIST) hist.shift();
-        history.set(name, hist);
-      }
-      if (selected && selected !== 'create') updateIO(selected);
-    }
-
-    function connectWS() {
-      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const ws = new WebSocket(`${proto}//${location.host}/ws`);
-
-      ws.onmessage = (e) => {
-        try {
-          const msg = JSON.parse(e.data);
-          if (msg.type === 'vms')      handleVMsMessage(msg.data);
-          else if (msg.type === 'counters') handleCountersMessage(msg.ts, msg.data);
-        } catch {}
-      };
-
-      ws.onclose = () => {
-        // Reconnect with a small backoff so we don't hammer on outage.
-        setTimeout(connectWS, 1500);
-      };
-
-      ws.onerror = () => ws.close();
-    }
-
-    // theme
-    function applyTheme(t) {
-      if (t === 'light') document.documentElement.setAttribute('data-theme', 'light');
-      else document.documentElement.removeAttribute('data-theme');
-      document.getElementById('theme-toggle').textContent = t === 'light' ? '☀' : '☾';
-    }
-
-    function toggleTheme() {
-      const cur = localStorage.getItem('theme') || 'dark';
-      const next = cur === 'dark' ? 'light' : 'dark';
-      localStorage.setItem('theme', next);
-      applyTheme(next);
-    }
-
-    applyTheme(localStorage.getItem('theme') || 'dark');
-    fetchImages();
-    connectWS();
+    render(html`<${App} />`, document.getElementById("app"));
   </script>
 </body>
 </html>

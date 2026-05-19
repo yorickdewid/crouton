@@ -1,15 +1,15 @@
 import { config } from "./config";
 import { handleApi } from "./routes/api";
 import { discoverVMs } from "./vm/discover";
-import { seedInstances } from "./vm/manager";
+import { VMManager } from "./vm/manager";
 import { WsHub } from "./server/ws";
 
-const wsHub = new WsHub();
+const discovered = await discoverVMs();
+const vmManager = new VMManager(discovered);
+const wsHub = new WsHub(vmManager);
 
 const ui = await Bun.file(`${import.meta.dir}/ui/index.html`).text();
 
-const discovered = await discoverVMs();
-seedInstances(discovered);
 
 const server = Bun.serve({
   port: config.port,
@@ -25,7 +25,7 @@ const server = Bun.serve({
     }
 
     if (pathname.startsWith("/api/")) {
-      const res = await handleApi(req, pathname);
+      const res = await handleApi(req, pathname, vmManager);
       if (res) return res;
     }
 

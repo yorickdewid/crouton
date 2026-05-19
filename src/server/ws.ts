@@ -1,5 +1,5 @@
 import type { ServerWebSocket } from "bun";
-import { listVMs } from "../vm/manager";
+import { type VMManager } from "../vm/manager";
 import { vmCounters } from "../api/ch";
 import { macToIp } from "../net/ip";
 
@@ -10,7 +10,17 @@ type Client = ServerWebSocket<unknown>;
  */
 export class WsHub {
   private readonly clients = new Set<Client>();
+  private readonly refreshInterval = 500; // ms
+  private readonly vmManager: VMManager;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
+
+  /**
+   * Creates a new WebSocket hub with a reference to the VM manager.
+   * @param vmManager - The VM manager instance to query for VM states
+   */
+  constructor(vmManager: VMManager) {
+    this.vmManager = vmManager;
+  }
 
   /**
    * Registers a client and immediately sends a VM snapshot.
@@ -43,7 +53,7 @@ export class WsHub {
    * Pushes the current VM list to clients, enriching running VMs with discovered IP addresses.
    */
   async pushVMs(): Promise<void> {
-    const vms = listVMs();
+    const vms = this.vmManager.listVMs();
     for (const vm of vms) {
       if (vm.state === "running") {
         const ip = await macToIp(vm.mac);
@@ -58,7 +68,7 @@ export class WsHub {
    */
   private async pushCounters(): Promise<void> {
     const data: Record<string, unknown> = {};
-    for (const vm of listVMs()) {
+    for (const vm of this.vmManager.listVMs()) {
       if (vm.state !== "running") continue;
       try { data[vm.name] = await vmCounters(vm.name); } catch { }
     }

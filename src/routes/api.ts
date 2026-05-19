@@ -1,6 +1,6 @@
 import path from "path";
 import { readdir, mkdir } from "fs/promises";
-import { listVMs, getVM, startVM, stopVM, deleteVM } from "../vm/manager";
+import type { VMManager } from "../vm/manager";
 import { vmInfo, vmShutdown, vmReboot, vmPause, vmResume, vmCounters, vmSnapshot } from "../api/ch";
 import { listImages, provisionVM } from "../vm/create";
 import { readVMConfig, writeVMConfig } from "../vm/persist";
@@ -8,12 +8,11 @@ import { macToIp } from "../net/ip";
 import { config } from "../config";
 // import { pushVMs } from "../server/ws";
 import type { CreateVMOptions } from "../vm/create";
-import type { VMConfig } from "../types";
 
 const DEFAULT_CPUS = 2;
 const DEFAULT_MEMORY_MB = 2048;
 
-export async function handleApi(req: Request, pathname: string): Promise<Response | null> {
+export async function handleApi(req: Request, pathname: string, vmManager: VMManager): Promise<Response | null> {
   const json = (data: unknown, status = 200) =>
     new Response(JSON.stringify(data), {
       status,
@@ -22,7 +21,7 @@ export async function handleApi(req: Request, pathname: string): Promise<Respons
 
   // GET /api/vms
   if (pathname === "/api/vms" && req.method === "GET") {
-    return json(listVMs());
+    return json(vmManager.listVMs());
   }
 
   // POST /api/vms — provision + start
@@ -30,7 +29,7 @@ export async function handleApi(req: Request, pathname: string): Promise<Respons
     try {
       const opts = (await req.json()) as CreateVMOptions;
       const vmConfig = await provisionVM(opts);
-      const instance = await startVM(vmConfig);
+      const instance = await vmManager.startVM(vmConfig);
       // pushVMs();
       return json(instance, 201);
     } catch (e: unknown) {
@@ -49,7 +48,7 @@ export async function handleApi(req: Request, pathname: string): Promise<Respons
     const name = vmMatch[1];
 
     if (req.method === "GET") {
-      const vm = getVM(name);
+      const vm = vmManager.getVM(name);
       if (!vm) return json({ error: "not found" }, 404);
       const ip = await macToIp(vm.mac);
       if (ip) vm.ip = ip;
@@ -64,7 +63,7 @@ export async function handleApi(req: Request, pathname: string): Promise<Respons
     // DELETE = wipe the VM directory (must be stopped)
     if (req.method === "DELETE") {
       try {
-        await deleteVM(name);
+        await vmManager.deleteVM(name);
         // pushVMs();
         return json({ ok: true });
       } catch (e: unknown) {
@@ -77,7 +76,7 @@ export async function handleApi(req: Request, pathname: string): Promise<Respons
   const startMatch = pathname.match(/^\/api\/vms\/([^/]+)\/start$/);
   if (startMatch && req.method === "POST") {
     const name = startMatch[1];
-    const vm = getVM(name);
+    const vm = vmManager.getVM(name);
     if (!vm) return json({ error: "not found" }, 404);
     if (vm.state === "running") return json({ error: "already running" }, 400);
 
@@ -92,7 +91,7 @@ export async function handleApi(req: Request, pathname: string): Promise<Respons
         };
         await writeVMConfig(cfg);
       }
-      const instance = await startVM(cfg);
+      const instance = await vmManager.startVM(cfg);
       // pushVMs();
       return json(instance);
     } catch (e: unknown) {
@@ -110,7 +109,7 @@ export async function handleApi(req: Request, pathname: string): Promise<Respons
       else if (action === "resume") await vmResume(name);
       else if (action === "shutdown") {
         try { await vmShutdown(name); }
-        catch { await stopVM(name); }
+        catch { await vmManager.stopVM(name); }
       }
       // pushVMs();
       return json({ ok: true });
@@ -147,7 +146,7 @@ export async function handleApi(req: Request, pathname: string): Promise<Respons
     }
 
     if (req.method === "POST") {
-      const vm = getVM(name);
+      const vm = vmManager.getVM(name);
       if (!vm) return json({ error: "not found" }, 404);
       if (vm.state !== "running") return json({ error: "VM must be running to snapshot" }, 400);
       try {

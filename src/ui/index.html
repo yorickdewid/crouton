@@ -137,9 +137,12 @@
       justify-content: space-between;
       align-items: center;
       gap: 12px;
+      transition: background 0.12s, padding-left 0.12s, border-color 0.12s;
+      animation: fadein 0.3s ease-out both;
     }
-    .vm-row:hover { background: var(--surface); }
+    .vm-row:hover { background: var(--surface); padding-left: 24px; }
     .vm-row.active { background: var(--surface); border-left: 2px solid var(--accent); padding-left: 18px; }
+    .vm-row.active:hover { padding-left: 22px; }
 
     .vm-row-left { min-width: 0; }
     .vm-row-name { font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -164,6 +167,12 @@
     .dot.error    { background: var(--danger); }
     .dot.unknown  { background: var(--muted); }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+    @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+    @keyframes slidein { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: none; } }
+    @keyframes flash-ok { 0% { background: var(--accent); color: var(--bg); } 100% {} }
+    @keyframes flash-err { 0% { background: var(--danger); color: var(--bg); } 100% {} }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes blink { 50% { opacity: 0; } }
 
     /* detail */
     .detail-wrap { flex: 1; overflow-y: auto; }
@@ -171,10 +180,22 @@
     .empty-state {
       height: 100%;
       display: flex;
+      flex-direction: column;
       align-items: center;
       justify-content: center;
       color: var(--muted);
+      gap: 20px;
+      animation: fadein 0.4s ease-out;
     }
+    .empty-art {
+      font-size: 11px;
+      line-height: 1.3;
+      color: var(--border);
+      white-space: pre;
+      letter-spacing: 0;
+    }
+    .empty-msg { font-size: 13px; }
+    .empty-msg .cursor { animation: blink 1s step-end infinite; color: var(--accent); }
 
     .detail { padding: 32px 36px; max-width: 720px; }
 
@@ -229,6 +250,7 @@
 
     svg.spark { display: block; width: 100%; height: 40px; }
     polyline { fill: none; stroke-width: 1.5; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+    polygon.spark-fill { stroke: none; opacity: 0.16; }
 
     /* disks */
     .disk-row {
@@ -276,10 +298,27 @@
       padding: 7px 18px;
       cursor: pointer;
       min-height: 38px;
+      transition: border-color 0.15s, color 0.15s, transform 0.08s, background 0.2s;
+      position: relative;
     }
     .btn:hover { border-color: var(--text); color: var(--text); }
+    .btn:active { transform: translateY(1px); }
     .btn.red:hover { border-color: var(--danger); color: var(--danger); }
     .btn:disabled { opacity: 0.3; cursor: default; pointer-events: none; }
+    .btn.flash-ok  { animation: flash-ok 0.6s ease-out; }
+    .btn.flash-err { animation: flash-err 0.6s ease-out; }
+    .btn.busy { color: var(--muted); pointer-events: none; }
+    .btn.busy::after {
+      content: '';
+      display: inline-block;
+      width: 10px; height: 10px;
+      margin-left: 8px;
+      border: 1.5px solid currentColor;
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: -2px;
+    }
 
     /* form */
     .form-wrap { padding: 32px 36px; max-width: 520px; }
@@ -298,11 +337,40 @@
       width: 100%;
       -webkit-appearance: none;
     }
-    .field input:focus, .field select:focus { border-color: var(--accent); }
+    .field input, .field select { transition: border-color 0.15s; }
+    .field input:focus, .field select:focus { border-color: var(--accent); outline: 1px solid rgba(78, 238, 131, 0.2); outline-offset: -2px; }
+    [data-theme="light"] .field input:focus, [data-theme="light"] .field select:focus { outline-color: rgba(74, 124, 15, 0.25); }
     .field select option { background: var(--surface); }
     .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 
     .form-error { color: var(--danger); font-size: 12px; margin-bottom: 14px; min-height: 18px; }
+
+    /* toasts */
+    .toasts {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      z-index: 100;
+      pointer-events: none;
+    }
+    .toast {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      color: var(--text);
+      padding: 10px 16px;
+      font-size: 13px;
+      max-width: 360px;
+      animation: slidein 0.25s ease-out;
+      pointer-events: auto;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+    }
+    .toast.err { border-left-color: var(--danger); }
+    .toast.fade { opacity: 0; transition: opacity 0.4s; }
+    [data-theme="light"] .toast { box-shadow: 0 4px 12px rgba(0,0,0,0.12); }
 
     /* theme toggle button */
     .theme-toggle {
@@ -350,8 +418,14 @@
       <div class="vm-rows" id="vm-rows"></div>
     </div>
 
+    <div class="toasts" id="toasts"></div>
+
     <div class="detail-wrap" id="detail-wrap">
-      <div id="detail-inner"><div class="empty-state"><span style="color:var(--muted)">select a vm</span></div></div>
+      <div id="detail-inner"><div class="empty-state"><pre class="empty-art">   ╭──────╮
+   │ ▒▒▒▒ │
+   │ ▒▒▒▒ │
+   ╰──────╯
+  crouton</pre><div class="empty-msg">pick a vm <span class="cursor">▎</span></div></div></div>
     </div>
   </div>
 
@@ -362,6 +436,34 @@
     let counterTimer = null;
 
     const isMobile = () => window.innerWidth <= 700;
+
+    // toasts
+    function toast(msg, kind = 'ok') {
+      const t = document.createElement('div');
+      t.className = 'toast' + (kind === 'err' ? ' err' : '');
+      t.textContent = msg;
+      document.getElementById('toasts').appendChild(t);
+      setTimeout(() => t.classList.add('fade'), 3500);
+      setTimeout(() => t.remove(), 4000);
+    }
+
+    // run an action with button feedback (busy spinner + success/error flash)
+    async function withButton(btn, fn) {
+      if (!btn) return fn();
+      btn.classList.add('busy');
+      try {
+        const result = await fn();
+        btn.classList.remove('busy');
+        btn.classList.add('flash-ok');
+        setTimeout(() => btn.classList.remove('flash-ok'), 600);
+        return result;
+      } catch (e) {
+        btn.classList.remove('busy');
+        btn.classList.add('flash-err');
+        setTimeout(() => btn.classList.remove('flash-err'), 600);
+        throw e;
+      }
+    }
 
     // formatting
     function fmtRate(bps) {
@@ -377,11 +479,13 @@
 
     // sparkline
     function sparkline(vals, color) {
-      if (vals.length < 2) return `<svg class="spark"><polyline points="" stroke="${color}"/></svg>`;
-      const max = Math.max(...vals, 1);
       const W = 200, H = 40;
+      if (vals.length < 2) return `<svg class="spark" viewBox="0 0 ${W} ${H}"><polyline points="" stroke="${color}"/></svg>`;
+      const max = Math.max(...vals, 1);
       const pts = vals.map((v, i) => `${(i / (vals.length - 1)) * W},${H - (v / max) * H}`).join(' ');
+      const fill = `0,${H} ${pts} ${W},${H}`;
       return `<svg class="spark" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">
+        <polygon class="spark-fill" points="${fill}" fill="${color}"/>
         <polyline points="${pts}" stroke="${color}"/></svg>`;
     }
 
@@ -456,14 +560,15 @@
 
     async function takeSnap(name) {
       const btn = document.getElementById('snap-btn');
-      if (btn) { btn.disabled = true; btn.textContent = 'working…'; }
       try {
-        const r = await fetch(`/api/vms/${name}/snapshots`, { method: 'POST' });
-        const d = await r.json();
-        if (!r.ok) alert(d.error);
-        else await refreshSnaps(name);
-      } catch (e) { alert(e.message); }
-      if (btn) { btn.disabled = false; btn.textContent = 'snapshot'; }
+        await withButton(btn, async () => {
+          const r = await fetch(`/api/vms/${name}/snapshots`, { method: 'POST' });
+          const d = await r.json();
+          if (!r.ok) throw new Error(d.error || 'snapshot failed');
+          await refreshSnaps(name);
+          toast(`📸 snapshot saved — ${d.name}`);
+        });
+      } catch (e) { toast(e.message, 'err'); }
     }
 
     async function refreshSnaps(name) {
@@ -474,8 +579,8 @@
     }
 
     function renderSnapList(snaps) {
-      if (!snaps.length) return '<div class="snap-none">no snapshots</div>';
-      return snaps.map(s => `<div class="snap-row"><span>${s.replace(/_/g,' ')}</span></div>`).join('');
+      if (!snaps.length) return '<div class="snap-none">no snapshots yet</div>';
+      return snaps.map(s => `<div class="snap-row"><span>📸 ${s.replace(/_/g,' ')}</span></div>`).join('');
     }
 
     // list
@@ -511,7 +616,11 @@
       const vm = vms.find(v => v.name === selected);
       if (!vm) {
         stopPolling();
-        inner.innerHTML = '<div class="empty-state"><span style="color:var(--muted)">select a vm</span></div>';
+        inner.innerHTML = '<div class="empty-state"><pre class="empty-art">   ╭──────╮
+   │ ▒▒▒▒ │
+   │ ▒▒▒▒ │
+   ╰──────╯
+  crouton</pre><div class="empty-msg">pick a vm <span class="cursor">▎</span></div></div>';
         return;
       }
 
@@ -537,12 +646,12 @@
 
           <div class="act-row top">
             ${alive
-              ? `<button class="btn" onclick="act('${vm.name}','reboot')">reboot</button>
-                 <button class="btn" onclick="act('${vm.name}','pause')">pause</button>
+              ? `<button class="btn" onclick="act('${vm.name}','reboot',event)">reboot</button>
+                 <button class="btn" onclick="act('${vm.name}','pause',event)">pause</button>
                  <button class="btn" id="snap-btn" onclick="takeSnap('${vm.name}')">snapshot</button>
-                 <button class="btn red" onclick="act('${vm.name}','shutdown')">shutdown</button>`
-              : `<button class="btn" onclick="startVm('${vm.name}')">start</button>
-                 <button class="btn red" onclick="deleteVm('${vm.name}')">delete</button>`
+                 <button class="btn red" onclick="act('${vm.name}','shutdown',event)">shutdown</button>`
+              : `<button class="btn" onclick="startVm('${vm.name}',event)">start</button>
+                 <button class="btn red" onclick="deleteVm('${vm.name}',event)">delete</button>`
             }
           </div>
 
@@ -620,6 +729,7 @@
         });
         const data = await res.json();
         if (!res.ok) { err.textContent = data.error || 'Failed.'; btn.disabled = false; btn.textContent = 'Create & start'; return; }
+        toast(`🥖 ${name} is rising`);
         selected = name;
         await fetchVMs();
         if (isMobile()) document.getElementById('header-sub').textContent = name;
@@ -666,22 +776,47 @@
       renderDetail();
     }
 
-    async function act(name, action) {
-      const res = await fetch(`/api/vms/${name}/${action}`, { method: 'PUT' });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'failed'); }
+    const ACTION_VERBS = {
+      reboot: 'rebooting',
+      pause: 'paused',
+      resume: 'resumed',
+      shutdown: 'shutting down',
+    };
+
+    async function act(name, action, ev) {
+      const btn = ev?.currentTarget;
+      try {
+        await withButton(btn, async () => {
+          const res = await fetch(`/api/vms/${name}/${action}`, { method: 'PUT' });
+          if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'failed'); }
+          toast(`${name} — ${ACTION_VERBS[action] || action}`);
+        });
+      } catch (e) { toast(e.message, 'err'); }
       fetchVMs();
     }
 
-    async function startVm(name) {
-      const res = await fetch(`/api/vms/${name}/start`, { method: 'POST' });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'failed to start'); }
+    async function startVm(name, ev) {
+      const btn = ev?.currentTarget;
+      try {
+        await withButton(btn, async () => {
+          const res = await fetch(`/api/vms/${name}/start`, { method: 'POST' });
+          if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'failed to start'); }
+          toast(`🚀 ${name} starting…`);
+        });
+      } catch (e) { toast(e.message, 'err'); }
       fetchVMs();
     }
 
-    async function deleteVm(name) {
+    async function deleteVm(name, ev) {
       if (!confirm(`Delete VM "${name}"?\nThis removes its disk and config permanently.`)) return;
-      const res = await fetch(`/api/vms/${name}`, { method: 'DELETE' });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'failed'); return; }
+      const btn = ev?.currentTarget;
+      try {
+        await withButton(btn, async () => {
+          const res = await fetch(`/api/vms/${name}`, { method: 'DELETE' });
+          if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'failed'); }
+          toast(`💀 ${name} deleted`);
+        });
+      } catch (e) { toast(e.message, 'err'); return; }
       selected = null;
       goBack();
       fetchVMs();

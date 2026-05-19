@@ -9,7 +9,7 @@ export class CloudHypervisor {
   /**
    * @param vmDir - Root directory containing per-VM folders with `vmm.sock` sockets.
    */
-  constructor(private readonly vmDir: string) {}
+  constructor(private readonly vmDir: string) { }
 
   /**
    * Liveness check for a VMM. Returns `false` instead of throwing on

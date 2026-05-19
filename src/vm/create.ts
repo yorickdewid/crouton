@@ -34,7 +34,7 @@ export class VMProvisioner {
     private readonly imageDir: string,
     private readonly vmDir: string,
     private readonly configStore: VMConfigStore,
-  ) {}
+  ) { }
 
   /**
    * Lists candidate base images available for provisioning.

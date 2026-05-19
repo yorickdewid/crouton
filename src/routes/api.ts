@@ -54,7 +54,7 @@ export class ApiRouter {
    */
   async handle(req: Request, pathname: string): Promise<Response | null> {
     if (pathname === "/api/vms") {
-      if (req.method === "GET")  return this.listVMs();
+      if (req.method === "GET") return this.listVMs();
       if (req.method === "POST") return this.createVM(req);
     }
 
@@ -65,7 +65,7 @@ export class ApiRouter {
     const vmMatch = pathname.match(/^\/api\/vms\/([^/]+)$/);
     if (vmMatch) {
       const name = vmMatch[1];
-      if (req.method === "GET")    return this.getVM(name);
+      if (req.method === "GET") return this.getVM(name);
       if (req.method === "DELETE") return this.deleteVM(name);
     }
 
@@ -83,7 +83,7 @@ export class ApiRouter {
     const snapshotsMatch = pathname.match(/^\/api\/vms\/([^/]+)\/snapshots$/);
     if (snapshotsMatch) {
       const name = snapshotsMatch[1];
-      if (req.method === "GET")  return this.listSnapshots(name);
+      if (req.method === "GET") return this.listSnapshots(name);
       if (req.method === "POST") return this.takeSnapshot(name);
     }
 
@@ -169,9 +169,9 @@ export class ApiRouter {
   private async runAction(name: string, action: ChAction): Promise<Response> {
     try {
       switch (action) {
-        case "reboot":   await this.chApi.vmReboot(name); break;
-        case "pause":    await this.chApi.vmPause(name); break;
-        case "resume":   await this.chApi.vmResume(name); break;
+        case "reboot": await this.chApi.vmReboot(name); break;
+        case "pause": await this.chApi.vmPause(name); break;
+        case "resume": await this.chApi.vmResume(name); break;
         case "shutdown":
           try { await this.chApi.vmShutdown(name); }
           catch { await this.vmManager.stopVM(name); }

@@ -10,7 +10,7 @@ export class VMConfigStore {
   /**
    * @param vmDir - Root directory containing per-VM folders.
    */
-  constructor(private readonly vmDir: string) {}
+  constructor(private readonly vmDir: string) { }
 
   /**
    * Reads the persisted config for a VM, if one exists.

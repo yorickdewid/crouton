@@ -36,7 +36,7 @@ export class VMDiscoverer {
     private readonly configStore: VMConfigStore,
     private readonly chApi: CloudHypervisor,
     private readonly net: NetworkManager,
-  ) {}
+  ) { }
 
   /**
    * Walks `vmDir` and produces a {@link VMInstance} per subdirectory.

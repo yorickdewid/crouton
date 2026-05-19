@@ -8,11 +8,11 @@ import { VMManager } from "./vm/manager";
 import { WsHub } from "./server/ws";
 import { ApiRouter } from "./routes/api";
 
-const chApi       = new CloudHypervisor(config.vmDir);
-const net         = new NetworkManager(config.bridgeInterface);
+const chApi = new CloudHypervisor(config.vmDir);
+const net = new NetworkManager(config.bridgeInterface);
 const configStore = new VMConfigStore(config.vmDir);
 const provisioner = new VMProvisioner(config.imageDir, config.vmDir, configStore);
-const discoverer  = new VMDiscoverer(config.vmDir, configStore, chApi, net);
+const discoverer = new VMDiscoverer(config.vmDir, configStore, chApi, net);
 
 const seed = await discoverer.discover();
 console.log(`discovered ${seed.length} VM(s): ${seed.map(v => `${v.name}(${v.state})`).join(", ")}`);
@@ -57,7 +57,7 @@ const server = Bun.serve({
   },
 
   websocket: {
-    open(ws)  { wsHub.addClient(ws); },
+    open(ws) { wsHub.addClient(ws); },
     close(ws) { wsHub.removeClient(ws); },
     message() { /* server doesn't consume client messages today */ },
   },

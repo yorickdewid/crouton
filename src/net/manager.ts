@@ -13,7 +13,7 @@ export class NetworkManager {
   constructor(
     private readonly bridgeInterface: string,
     private readonly tapOwner: string = process.env.USER ?? "root",
-  ) {}
+  ) { }
 
   /**
    * The configured host bridge interface name.

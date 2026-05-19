@@ -8,7 +8,6 @@ const ui = await Bun.file(`${import.meta.dir}/ui/index.html`).text();
 
 const discovered = await discoverVMs();
 seedInstances(discovered);
-console.log(`discovered ${discovered.length} VM(s): ${discovered.map(v => `${v.name}(${v.state})`).join(", ")}`);
 
 const server = Bun.serve({
   port: config.port,

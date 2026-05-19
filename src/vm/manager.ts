@@ -112,7 +112,7 @@ export class VMManager {
 
     const args = this.buildChArgs({ vmDir, sockPath, tap, mac, vmConfig });
 
-    const proc = Bun.spawn(["sudo", this.chBinary, ...args], {
+    const proc = Bun.spawn([this.chBinary, ...args], {
       stdout: "pipe",
       stderr: "pipe",
       onExit: async (_proc, code) => {

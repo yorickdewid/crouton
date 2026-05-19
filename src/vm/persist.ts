@@ -6,38 +6,32 @@ import type { VMConfig } from "../types";
  * Persists per-VM configuration to `<vmDir>/<name>/crouton.json`.
  * Treated as the authoritative config when present.
  */
-export class VMConfigStore {
-  /**
-   * @param vmDir - Root directory containing per-VM folders.
-   */
-  constructor(private readonly vmDir: string) { }
+export interface VMConfigStore {
+  /** Reads the persisted config for a VM, or `undefined` if absent. */
+  read(name: string): Promise<VMConfig | undefined>;
+  /** Writes the config for a VM, overwriting any existing file. */
+  write(cfg: VMConfig): Promise<void>;
+}
 
-  /**
-   * Reads the persisted config for a VM, if one exists.
-   * @param name - VM name.
-   * @returns Parsed config, or `undefined` if no config file exists or it's unreadable.
-   */
-  async read(name: string): Promise<VMConfig | undefined> {
-    try {
-      const text = await readFile(this.pathFor(name), "utf-8");
-      return JSON.parse(text) as VMConfig;
-    } catch {
-      return undefined;
-    }
-  }
+/**
+ * Builds a {@link VMConfigStore} rooted at a VM directory.
+ * @param vmDir - Root directory containing per-VM folders.
+ */
+export function createConfigStore(vmDir: string): VMConfigStore {
+  const pathFor = (name: string): string => path.join(vmDir, name, "crouton.json");
 
-  /**
-   * Writes the config for a VM, overwriting any existing file.
-   * @param cfg - Config to persist; `cfg.name` determines the file location.
-   */
-  async write(cfg: VMConfig): Promise<void> {
-    await writeFile(this.pathFor(cfg.name), JSON.stringify(cfg, null, 2));
-  }
+  return {
+    async read(name) {
+      try {
+        const text = await readFile(pathFor(name), "utf-8");
+        return JSON.parse(text) as VMConfig;
+      } catch {
+        return undefined;
+      }
+    },
 
-  /**
-   * Resolves the file path that holds the config for a given VM.
-   */
-  private pathFor(name: string): string {
-    return path.join(this.vmDir, name, "crouton.json");
-  }
+    async write(cfg) {
+      await writeFile(pathFor(cfg.name), JSON.stringify(cfg, null, 2));
+    },
+  };
 }

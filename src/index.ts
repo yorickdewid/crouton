@@ -1,18 +1,22 @@
 import { config } from "./config";
-import { CloudHypervisor } from "./api/ch";
-import { NetworkManager } from "./net/manager";
-import { VMConfigStore } from "./vm/persist";
-import { VMProvisioner } from "./vm/create";
-import { VMDiscoverer } from "./vm/discover";
+import { createCloudHypervisor } from "./api/ch";
+import { createNetwork } from "./net/manager";
+import { createConfigStore } from "./vm/persist";
+import { createProvisioner } from "./vm/create";
+import { createDiscoverer } from "./vm/discover";
 import { VMManager } from "./vm/manager";
 import { WsHub } from "./server/ws";
-import { ApiRouter } from "./routes/api";
+import { createApiRouter } from "./routes/api";
 
-const chApi = new CloudHypervisor(config.vmDir);
-const net = new NetworkManager(config.bridgeInterface);
-const configStore = new VMConfigStore(config.vmDir);
-const provisioner = new VMProvisioner(config.imageDir, config.vmDir, configStore);
-const discoverer = new VMDiscoverer(config.vmDir, configStore, chApi, net);
+const chApi = createCloudHypervisor(config.vmDir);
+const net = createNetwork(config.bridgeInterface);
+const configStore = createConfigStore(config.vmDir);
+const provisioner = createProvisioner({
+  imageDir: config.imageDir,
+  vmDir: config.vmDir,
+  configStore,
+});
+const discoverer = createDiscoverer({ vmDir: config.vmDir, configStore, chApi, net });
 
 const seed = await discoverer.discover();
 console.log(`discovered ${seed.length} VM(s): ${seed.map(v => `${v.name}(${v.state})`).join(", ")}`);
@@ -26,7 +30,7 @@ const vmManager = new VMManager({
 });
 
 const wsHub = new WsHub({ vmManager, chApi, net });
-const router = new ApiRouter({
+const handleApi = createApiRouter({
   vmManager, chApi, provisioner, configStore, net, wsHub, vmDir: config.vmDir,
 });
 
@@ -45,7 +49,7 @@ const server = Bun.serve({
     }
 
     if (pathname.startsWith("/api/")) {
-      const res = await router.handle(req, pathname);
+      const res = await handleApi(req, pathname);
       if (res) return res;
     }
 

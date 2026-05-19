@@ -40,75 +40,77 @@ export const CreateVMOptionsSchema = z.object({
 export type CreateVMOptions = z.infer<typeof CreateVMOptionsSchema>;
 
 /**
+ * Dependencies required by {@link createProvisioner}.
+ */
+export interface ProvisionerDeps {
+  imageDir: string;
+  vmDir: string;
+  configStore: VMConfigStore;
+}
+
+/**
  * Creates new VM directories: copies a base image, resizes its disk,
  * and writes the initial `crouton.json` config.
  */
-export class VMProvisioner {
-  /**
-   * @param imageDir - Directory containing base disk images.
-   * @param vmDir - Directory under which per-VM folders are created.
-   * @param configStore - Store used to persist the new VM's config.
-   */
-  constructor(
-    private readonly imageDir: string,
-    private readonly vmDir: string,
-    private readonly configStore: VMConfigStore,
-  ) { }
+export interface VMProvisioner {
+  /** Sorted list of base-image filenames available in `imageDir`. */
+  listImages(): Promise<string[]>;
+  /** Provisions a new VM directory and persists its config. */
+  provision(opts: CreateVMOptions): Promise<VMConfig>;
+}
 
-  /**
-   * Lists candidate base images available for provisioning.
-   * @returns Sorted list of filenames inside `imageDir` ending in `.qcow2`, `.img`, or `.raw`.
-   */
-  async listImages(): Promise<string[]> {
-    try {
-      const entries = await readdir(this.imageDir);
-      return entries
-        .filter(f => f.endsWith(".qcow2") || f.endsWith(".img") || f.endsWith(".raw"))
-        .sort();
-    } catch {
-      return [];
-    }
-  }
+/**
+ * Builds a {@link VMProvisioner}.
+ */
+export function createProvisioner(deps: ProvisionerDeps): VMProvisioner {
+  const { imageDir, vmDir: rootDir, configStore } = deps;
 
-  /**
-   * Provisions a new VM directory and persists its config.
-   * @param opts - VM parameters; see {@link CreateVMOptions}.
-   * @returns The persisted {@link VMConfig} ready to be passed to the manager to start.
-   * @throws If a VM with this name already has a `disk0.qcow2` on disk.
-   */
-  async provision(opts: CreateVMOptions): Promise<VMConfig> {
-    const { name, image, diskSizeGb, cpus, memoryMb } = opts;
+  return {
+    async listImages() {
+      try {
+        const entries = await readdir(imageDir);
+        return entries
+          .filter(f => f.endsWith(".qcow2") || f.endsWith(".img") || f.endsWith(".raw"))
+          .sort();
+      } catch {
+        return [];
+      }
+    },
 
-    const vmDir = path.join(this.vmDir, name);
-    const diskPath = path.join(vmDir, "disk0.qcow2");
-    const imagePath = path.join(this.imageDir, image);
+    async provision(opts) {
+      const { name, image, diskSizeGb, cpus, memoryMb } = opts;
 
-    if (!(await Bun.file(imagePath).exists())) {
-      throw new Error(`base image '${image}' not found in image directory`);
-    }
-    if (await Bun.file(diskPath).exists()) {
-      throw new Error(`VM '${name}' already exists`);
-    }
+      const vmDir = path.join(rootDir, name);
+      const diskPath = path.join(vmDir, "disk0.qcow2");
+      const imagePath = path.join(imageDir, image);
 
-    await mkdir(vmDir, { recursive: true });
-    try {
-      await copyFile(imagePath, diskPath);
-      await $`qemu-img resize ${diskPath} ${diskSizeGb}G`;
+      if (!(await Bun.file(imagePath).exists())) {
+        throw new Error(`base image '${image}' not found in image directory`);
+      }
+      if (await Bun.file(diskPath).exists()) {
+        throw new Error(`VM '${name}' already exists`);
+      }
 
-      const vmConfig: VMConfig = {
-        name,
-        cpus,
-        memoryMb,
-        bootMode: "uefi",
-        disks: ["disk0.qcow2"],
-      };
+      await mkdir(vmDir, { recursive: true });
+      try {
+        await copyFile(imagePath, diskPath);
+        await $`qemu-img resize ${diskPath} ${diskSizeGb}G`;
 
-      await this.configStore.write(vmConfig);
-      return vmConfig;
-    } catch (err) {
-      // Roll back the partial VM directory so a retry starts from a clean slate.
-      await rm(vmDir, { recursive: true, force: true }).catch(() => { /* nothing to roll back */ });
-      throw err;
-    }
-  }
+        const vmConfig: VMConfig = {
+          name,
+          cpus,
+          memoryMb,
+          bootMode: "uefi",
+          disks: ["disk0.qcow2"],
+        };
+
+        await configStore.write(vmConfig);
+        return vmConfig;
+      } catch (err) {
+        // Roll back the partial VM directory so a retry starts from a clean slate.
+        await rm(vmDir, { recursive: true, force: true }).catch(() => { /* nothing to roll back */ });
+        throw err;
+      }
+    },
+  };
 }

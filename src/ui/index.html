@@ -514,6 +514,27 @@
     }
     .hero-value .accent { color: var(--accent); }
     .hero-value .small { font-size: 11px; color: var(--muted); font-weight: 400; margin-left: 4px; }
+    .hero-sub { font-size: 11px; color: var(--muted); margin-top: 2px; font-variant-numeric: tabular-nums; }
+
+    /* progress bar inside a hero cell */
+    .hero-bar {
+      height: 3px;
+      background: var(--surface2);
+      margin-top: 8px;
+      border-radius: 2px;
+      overflow: hidden;
+    }
+    .hero-bar-fill {
+      height: 100%;
+      background: var(--accent);
+      transition: width 0.4s, background 0.3s;
+      box-shadow: 0 0 6px var(--accent);
+    }
+    .hero-bar-fill.warn { background: var(--warn); box-shadow: 0 0 6px var(--warn); }
+    .hero-bar-fill.danger { background: var(--danger); box-shadow: 0 0 6px var(--danger); }
+    [data-theme="light"] .hero-bar-fill,
+    [data-theme="light"] .hero-bar-fill.warn,
+    [data-theme="light"] .hero-bar-fill.danger { box-shadow: none; }
 
     /* card depth — top edge highlight on surfaces */
     .io-card, .stat-card {
@@ -741,37 +762,67 @@
       `;
     }
 
-    function fmtMemory(mb) {
+    function fmtMemMb(mb) {
       if (!mb) return "0";
       if (mb < 1024) return `${mb} MB`;
       return `${(mb / 1024).toFixed(1)} GB`;
     }
 
-    function HeroBar({ vms }) {
+    function fmtBytes(b) {
+      if (!b) return "0";
+      const gb = b / (1024 ** 3);
+      if (gb >= 1000) return `${(gb / 1024).toFixed(1)} TB`;
+      if (gb >= 1) return `${gb.toFixed(1)} GB`;
+      return `${(b / (1024 ** 2)).toFixed(0)} MB`;
+    }
+
+    function barClass(ratio) {
+      if (ratio >= 0.85) return " danger";
+      if (ratio >= 0.65) return " warn";
+      return "";
+    }
+
+    function HeroBar({ vms, host }) {
       const running = vms.filter(v => v.state === "running").length;
-      const paused = vms.filter(v => v.state === "stopping" || v.state === "booting").length;
-      const totalMem = vms
-        .filter(v => v.state === "running")
-        .reduce((acc, v) => acc + (v.config.memoryMb ?? 0), 0);
-      const totalSnaps = vms.reduce((acc, v) => acc + (v.snapshots?.length ?? 0), 0);
+
+      const cpuPct = host ? Math.round(host.cpuUsage * 100) : 0;
+      const memRatio = host && host.memTotalMb > 0 ? host.memUsedMb / host.memTotalMb : 0;
+      const diskRatio = host && host.diskTotalBytes > 0
+        ? 1 - (host.diskFreeBytes / host.diskTotalBytes)
+        : 0;
 
       return html`
         <div class="hero">
           <div class="hero-cell">
+            <div class="hero-label">Host CPU</div>
+            <div class="hero-value">
+              ${host ? cpuPct : "—"}<span class="small">%</span>
+            </div>
+            <div class="hero-sub">${host ? `${host.cpus} cores · ${host.loadAvg.map(n => n.toFixed(2)).join(" ")}` : ""}</div>
+            <div class="hero-bar"><div class=${"hero-bar-fill" + barClass(cpuPct / 100)} style=${`width:${cpuPct}%`}></div></div>
+          </div>
+          <div class="hero-cell">
+            <div class="hero-label">Host Memory</div>
+            <div class="hero-value">
+              ${host ? fmtMemMb(host.memUsedMb) : "—"}<span class="small">/ ${host ? fmtMemMb(host.memTotalMb) : "—"}</span>
+            </div>
+            <div class="hero-sub">${host ? `${Math.round(memRatio * 100)}% used` : ""}</div>
+            <div class="hero-bar"><div class=${"hero-bar-fill" + barClass(memRatio)} style=${`width:${memRatio * 100}%`}></div></div>
+          </div>
+          <div class="hero-cell">
             <div class="hero-label">Fleet</div>
-            <div class="hero-value">${vms.length}<span class="small">vm${vms.length === 1 ? "" : "s"}</span></div>
+            <div class="hero-value">
+              <span class="accent">${running}</span><span class="small">/ ${vms.length} running</span>
+            </div>
+            <div class="hero-sub">${vms.length === 0 ? "no VMs yet" : `${vms.length - running} stopped`}</div>
           </div>
           <div class="hero-cell">
-            <div class="hero-label">Running</div>
-            <div class="hero-value"><span class="accent">${running}</span><span class="small">/ ${vms.length}</span></div>
-          </div>
-          <div class="hero-cell">
-            <div class="hero-label">Memory</div>
-            <div class="hero-value">${fmtMemory(totalMem)}</div>
-          </div>
-          <div class="hero-cell">
-            <div class="hero-label">Snapshots</div>
-            <div class="hero-value">${totalSnaps}</div>
+            <div class="hero-label">VM Storage</div>
+            <div class="hero-value">
+              ${host ? fmtBytes(host.diskFreeBytes) : "—"}<span class="small">free</span>
+            </div>
+            <div class="hero-sub">${host ? `of ${fmtBytes(host.diskTotalBytes)}` : ""}</div>
+            <div class="hero-bar"><div class=${"hero-bar-fill" + barClass(diskRatio)} style=${`width:${diskRatio * 100}%`}></div></div>
           </div>
         </div>
       `;
@@ -1040,6 +1091,7 @@
     // ── root ─────────────────────────────────────────────────────────────
     function App() {
       const [vms, setVms] = useState([]);
+      const [host, setHost] = useState(null);
       const [images, setImages] = useState([]);
       const [selected, setSelected] = useState(null);
       const [theme, setTheme] = useState(localStorage.getItem("theme") || "dark");
@@ -1080,6 +1132,7 @@
             try {
               const msg = JSON.parse(e.data);
               if (msg.type === "vms") setVms(msg.data);
+              else if (msg.type === "host") setHost(msg.data);
               else if (msg.type === "counters") {
                 ingestCounters(history.current, msg.ts, msg.data);
                 setTick(t => t + 1);
@@ -1214,7 +1267,7 @@
           onBack=${() => setSelected(null)}
           onToggleTheme=${() => setTheme(t => t === "dark" ? "light" : "dark")} />
 
-        <${HeroBar} vms=${vms} />
+        <${HeroBar} vms=${vms} host=${host} />
 
         <div class="layout">
           <${VMList}

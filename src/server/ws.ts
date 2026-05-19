@@ -3,6 +3,7 @@ import type { VMManager } from "../vm/manager";
 import type { CloudHypervisor } from "../api/ch";
 import type { NetworkManager } from "../net/manager";
 import type { SnapshotStore } from "../vm/snapshots";
+import type { HostMetrics } from "../host/metrics";
 
 type Client = ServerWebSocket<unknown>;
 
@@ -18,6 +19,8 @@ export interface WsHubOptions {
   net: NetworkManager;
   /** Read-side access to per-VM snapshot directories. */
   snapshots: SnapshotStore;
+  /** Host-side resource metrics (CPU, memory, load, disk). */
+  hostMetrics: HostMetrics;
   /** Refresh interval in milliseconds. Defaults to 500. */
   refreshInterval?: number;
 }
@@ -34,6 +37,7 @@ export class WsHub {
   private readonly chApi: CloudHypervisor;
   private readonly net: NetworkManager;
   private readonly snapshots: SnapshotStore;
+  private readonly hostMetrics: HostMetrics;
   private readonly refreshInterval: number;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -45,6 +49,7 @@ export class WsHub {
     this.chApi = opts.chApi;
     this.net = opts.net;
     this.snapshots = opts.snapshots;
+    this.hostMetrics = opts.hostMetrics;
     this.refreshInterval = opts.refreshInterval ?? 500;
   }
 
@@ -61,7 +66,9 @@ export class WsHub {
    */
   addClient(ws: Client): void {
     this.clients.add(ws);
+    // Send initial VM + host snapshot so the dashboard renders immediately.
     this.pushVMs().catch(() => { /* swallow — broadcast errors mustn't crash add */ });
+    this.pushHost().catch(() => { /* same */ });
   }
 
   /**
@@ -96,6 +103,7 @@ export class WsHub {
       if (this.clientCount === 0) return; // skip work when nobody listening
       await this.pushVMs();
       await this.pushCounters();
+      await this.pushHost();
     }, this.refreshInterval);
   }
 
@@ -106,6 +114,18 @@ export class WsHub {
     if (!this.refreshTimer) return;
     clearInterval(this.refreshTimer);
     this.refreshTimer = undefined;
+  }
+
+  /**
+   * Collects a host metrics snapshot and broadcasts it.
+   */
+  private async pushHost(): Promise<void> {
+    try {
+      const data = await this.hostMetrics.collect();
+      this.send({ type: "host", data });
+    } catch {
+      // collection failed (e.g. /proc unavailable); skip this tick
+    }
   }
 
   /**

@@ -18,16 +18,6 @@ export class VMManager {
   }
 
   /**
-   * Seed the manager with VM instances
-   * @param instances - Array of VM instances to load into the manager
-   */
-  seedInstances(instances: VMInstance[]): void {
-    for (const vm of instances) {
-      this.instances.set(vm.name, vm);
-    }
-  }
-
-  /**
    * Get all VM instances
    * @returns Array of all managed VM instances
    */

@@ -2,7 +2,7 @@ import path from "path";
 import { readdir, mkdir } from "fs/promises";
 import type { VMManager } from "../vm/manager";
 import type { CloudHypervisor } from "../api/ch";
-import type { VMProvisioner, CreateVMOptions } from "../vm/create";
+import { CreateVMOptionsSchema, type VMProvisioner } from "../vm/create";
 import type { VMConfigStore } from "../vm/persist";
 import type { NetworkManager } from "../net/manager";
 import type { WsHub } from "../server/ws";
@@ -99,9 +99,19 @@ export class ApiRouter {
 
   /** `POST /api/vms` — provision + start. */
   private async createVM(req: Request): Promise<Response> {
+    let raw: unknown;
+    try { raw = await req.json(); }
+    catch { return this.json({ error: "request body is not valid JSON" }, 400); }
+
+    const parsed = CreateVMOptionsSchema.safeParse(raw);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const where = issue.path.length ? issue.path.join(".") : "body";
+      return this.json({ error: `${where}: ${issue.message}` }, 400);
+    }
+
     try {
-      const opts = (await req.json()) as CreateVMOptions;
-      const vmConfig = await this.provisioner.provision(opts);
+      const vmConfig = await this.provisioner.provision(parsed.data);
       const instance = await this.vmManager.startVM(vmConfig);
       this.wsHub.pushVMs();
       return this.json(instance, 201);

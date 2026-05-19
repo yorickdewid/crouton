@@ -84,6 +84,6 @@ export class WsHub {
       if (this.clients.size === 0) return; // skip work when nobody listening
       await this.pushVMs();
       await this.pushCounters();
-    }, 500);
+    }, this.refreshInterval);
   }
 }

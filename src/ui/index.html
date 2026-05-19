@@ -41,7 +41,10 @@
     html, body { height: 100%; }
 
     body {
-      background: var(--bg);
+      background:
+        radial-gradient(ellipse at 0% 0%, rgba(78, 238, 131, 0.04), transparent 50%),
+        radial-gradient(ellipse at 100% 100%, rgba(121, 184, 255, 0.03), transparent 50%),
+        var(--bg);
       color: var(--text);
       font-family: var(--font);
       font-size: 13px;
@@ -50,6 +53,20 @@
       flex-direction: column;
       overflow: hidden;
     }
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255,255,255,0.012) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.012) 1px, transparent 1px);
+      background-size: 32px 32px;
+      z-index: 0;
+    }
+    [data-theme="light"] body { background: var(--bg); }
+    [data-theme="light"] body::before { background-image: none; }
+    body > * { position: relative; z-index: 1; }
 
     /* header */
     header {
@@ -171,15 +188,26 @@
       flex-shrink: 0;
     }
 
-    .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
-    .dot.running  { background: var(--accent); box-shadow: 0 0 8px var(--accent); }
+    .dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; position: relative; }
+    .dot.running  { background: var(--accent); box-shadow: 0 0 10px var(--accent), 0 0 18px var(--accent); }
+    .dot.running::after {
+      content: '';
+      position: absolute;
+      inset: -4px;
+      border-radius: 50%;
+      border: 1px solid var(--accent);
+      opacity: 0.4;
+      animation: halo 2s ease-out infinite;
+    }
     [data-theme="light"] .dot.running { box-shadow: none; }
-    .dot.booting  { background: var(--warn); animation: pulse 1s infinite; }
+    [data-theme="light"] .dot.running::after { display: none; }
+    .dot.booting  { background: var(--warn); box-shadow: 0 0 8px var(--warn); animation: pulse 1s infinite; }
     .dot.stopping { background: var(--warn); animation: pulse 1s infinite; }
     .dot.stopped  { background: var(--muted); }
-    .dot.error    { background: var(--danger); }
+    .dot.error    { background: var(--danger); box-shadow: 0 0 8px var(--danger); }
     .dot.unknown  { background: var(--muted); }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+    @keyframes halo { 0% { transform: scale(0.6); opacity: 0.6; } 100% { transform: scale(2.2); opacity: 0; } }
     @keyframes fadein { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
     @keyframes slidein { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: none; } }
     @keyframes flash-ok { 0% { background: var(--accent); color: var(--bg); } 100% {} }
@@ -433,12 +461,86 @@
     }
     .theme-toggle:hover { border-color: var(--text); color: var(--text); }
 
+    /* WebSocket live pulse */
+    .ws-pulse {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      margin-right: 14px;
+    }
+    .ws-pulse .ws-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: var(--accent);
+      box-shadow: 0 0 6px var(--accent);
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .ws-pulse.flash .ws-dot {
+      transform: scale(1.4);
+      box-shadow: 0 0 12px var(--accent), 0 0 20px var(--accent);
+    }
+    .ws-pulse.dead .ws-dot { background: var(--muted); box-shadow: none; }
+
+    /* hero stats bar — sits above the VM list */
+    .hero {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(to bottom, var(--surface), var(--bg));
+      flex-shrink: 0;
+    }
+    .hero-cell {
+      padding: 14px 18px;
+      border-right: 1px solid var(--border);
+    }
+    .hero-cell:last-child { border-right: none; }
+    .hero-label {
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0.14em;
+      text-transform: uppercase;
+      margin-bottom: 6px;
+    }
+    .hero-value {
+      font-size: 20px;
+      font-weight: 600;
+      color: var(--text);
+      font-variant-numeric: tabular-nums;
+    }
+    .hero-value .accent { color: var(--accent); }
+    .hero-value .small { font-size: 11px; color: var(--muted); font-weight: 400; margin-left: 4px; }
+
+    /* card depth — top edge highlight on surfaces */
+    .io-card, .stat-card {
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.03),
+        0 1px 0 rgba(0,0,0,0.2);
+    }
+    [data-theme="light"] .io-card,
+    [data-theme="light"] .stat-card {
+      box-shadow: 0 1px 0 rgba(0,0,0,0.04);
+    }
+
+    /* sparkline endpoint glow */
+    circle.spark-tip {
+      fill: currentColor;
+      r: 2.5;
+    }
+
     /* mobile */
     @media (max-width: 700px) {
       .vm-list { width: 100%; border-right: none; }
       .vm-list.hidden { display: none; }
       .detail-wrap { display: none; width: 100%; }
       .detail-wrap.visible { display: block; }
+      .hero { grid-template-columns: repeat(2, 1fr); }
+      .hero-cell:nth-child(2) { border-right: none; }
+      .hero-cell:nth-child(-n+2) { border-bottom: 1px solid var(--border); }
       .detail { padding: 22px; }
       .form-wrap { padding: 22px; }
       .detail-name { font-size: 22px; }
@@ -545,23 +647,32 @@
         return html`<svg class="spark" viewBox=${`0 0 ${W} ${H}`}><polyline points="" stroke=${color} /></svg>`;
       }
       const max = Math.max(...values, 1);
-      const pts = values.map((v, i) => `${(i / (values.length - 1)) * W},${H - (v / max) * H}`).join(" ");
-      const fill = `0,${H} ${pts} ${W},${H}`;
+      const pts = values.map((v, i) => [(i / (values.length - 1)) * W, H - (v / max) * H]);
+      const ptsStr = pts.map(([x, y]) => `${x},${y}`).join(" ");
+      const fill = `0,${H} ${ptsStr} ${W},${H}`;
+      const tip = pts[pts.length - 1];
       return html`
-        <svg class="spark" viewBox=${`0 0 ${W} ${H}`} preserveAspectRatio="none">
+        <svg class="spark" viewBox=${`0 0 ${W} ${H}`} preserveAspectRatio="none" style=${`color:${color}`}>
           <defs>
             <linearGradient id=${gradId} x1="0" y1="0" x2="0" y2="1">
               <stop offset="0%" stop-color=${color} stop-opacity="0.45" />
               <stop offset="100%" stop-color=${color} stop-opacity="0" />
             </linearGradient>
+            <radialGradient id=${gradId + "-tip"}>
+              <stop offset="0%" stop-color=${color} stop-opacity="1" />
+              <stop offset="100%" stop-color=${color} stop-opacity="0" />
+            </radialGradient>
           </defs>
           <polygon class="spark-fill" points=${fill} fill=${`url(#${gradId})`} />
-          <polyline class="spark-line" points=${pts} stroke=${color} />
+          <polyline class="spark-line" points=${ptsStr} stroke=${color} />
+          <circle cx=${tip[0]} cy=${tip[1]} r="5" fill=${`url(#${gradId + "-tip"})`} />
+          <circle class="spark-tip" cx=${tip[0]} cy=${tip[1]} />
         </svg>
       `;
     }
 
-    function Header({ subtitle, vmCount, running, theme, onBack, onToggleTheme, showBack }) {
+    function Header({ subtitle, theme, onBack, onToggleTheme, showBack, wsLive, wsFlash }) {
+      const pulseCls = "ws-pulse" + (wsFlash ? " flash" : "") + (!wsLive ? " dead" : "");
       return html`
         <header>
           ${showBack ? html`<button class="back-btn" style="display:inline" onClick=${onBack}>← back</button>` : null}
@@ -569,11 +680,45 @@
           <span class="sep">/</span>
           <span class="subtitle">${subtitle}</span>
           <span class="spacer"></span>
-          <span style="color:var(--muted);font-size:12px;margin-right:12px">
-            ${vmCount > 0 ? `${running} / ${vmCount} running` : ""}
-          </span>
+          <span class=${pulseCls}><span class="ws-dot"></span>${wsLive ? "live" : "offline"}</span>
           <button class="theme-toggle" onClick=${onToggleTheme}>${theme === "dark" ? "☾" : "☀"}</button>
         </header>
+      `;
+    }
+
+    function fmtMemory(mb) {
+      if (!mb) return "0";
+      if (mb < 1024) return `${mb} MB`;
+      return `${(mb / 1024).toFixed(1)} GB`;
+    }
+
+    function HeroBar({ vms }) {
+      const running = vms.filter(v => v.state === "running").length;
+      const paused = vms.filter(v => v.state === "stopping" || v.state === "booting").length;
+      const totalMem = vms
+        .filter(v => v.state === "running")
+        .reduce((acc, v) => acc + (v.config.memoryMb ?? 0), 0);
+      const totalSnaps = vms.reduce((acc, v) => acc + (v.snapshots?.length ?? 0), 0);
+
+      return html`
+        <div class="hero">
+          <div class="hero-cell">
+            <div class="hero-label">Fleet</div>
+            <div class="hero-value">${vms.length}<span class="small">vm${vms.length === 1 ? "" : "s"}</span></div>
+          </div>
+          <div class="hero-cell">
+            <div class="hero-label">Running</div>
+            <div class="hero-value"><span class="accent">${running}</span><span class="small">/ ${vms.length}</span></div>
+          </div>
+          <div class="hero-cell">
+            <div class="hero-label">Memory</div>
+            <div class="hero-value">${fmtMemory(totalMem)}</div>
+          </div>
+          <div class="hero-cell">
+            <div class="hero-label">Snapshots</div>
+            <div class="hero-value">${totalSnaps}</div>
+          </div>
+        </div>
       `;
     }
 
@@ -829,7 +974,10 @@
       const [theme, setTheme] = useState(localStorage.getItem("theme") || "dark");
       const [toasts, setToasts] = useState([]);
       const [, setTick] = useState(0); // forces a re-render when counters arrive
+      const [wsLive, setWsLive] = useState(false);
+      const [wsFlash, setWsFlash] = useState(false);
       const history = useRef(new Map());
+      const flashTimer = useRef(null);
 
       // ── theme ──
       useEffect(() => {
@@ -847,10 +995,17 @@
       useEffect(() => {
         let ws, alive = true;
         const proto = location.protocol === "https:" ? "wss:" : "ws:";
+        const flashPulse = () => {
+          setWsFlash(true);
+          if (flashTimer.current) clearTimeout(flashTimer.current);
+          flashTimer.current = setTimeout(() => setWsFlash(false), 180);
+        };
         const connect = () => {
           if (!alive) return;
           ws = new WebSocket(`${proto}//${location.host}/ws`);
+          ws.onopen = () => setWsLive(true);
           ws.onmessage = e => {
+            flashPulse();
             try {
               const msg = JSON.parse(e.data);
               if (msg.type === "vms") setVms(msg.data);
@@ -860,7 +1015,7 @@
               }
             } catch {}
           };
-          ws.onclose = () => { if (alive) setTimeout(connect, 1500); };
+          ws.onclose = () => { setWsLive(false); if (alive) setTimeout(connect, 1500); };
           ws.onerror = () => ws.close();
         };
         connect();
@@ -969,12 +1124,14 @@
       return html`
         <${Header}
           subtitle=${subtitle}
-          vmCount=${vms.length}
-          running=${running}
           theme=${theme}
           showBack=${mobile && !!selected}
+          wsLive=${wsLive}
+          wsFlash=${wsFlash}
           onBack=${() => setSelected(null)}
           onToggleTheme=${() => setTheme(t => t === "dark" ? "light" : "dark")} />
+
+        <${HeroBar} vms=${vms} />
 
         <div class="layout">
           <${VMList}

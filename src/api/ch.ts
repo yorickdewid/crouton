@@ -1,9 +1,18 @@
 import path from "path";
 import { config } from "../config";
 
+/**
+ * Cloud Hypervisor API client bound to VM socket paths under the configured VM directory.
+ */
 export class CloudHypervisor {
+  /**
+   * @param vmDir Root directory containing per-VM folders with vmm.sock sockets.
+   */
   constructor(private readonly vmDir: string = config.vmDir) { }
 
+  /**
+   * Sends an HTTP request over a Unix domain socket to the Cloud Hypervisor API.
+   */
   private async request<T>(sockPath: string, endpoint: string, method = "GET", body?: unknown): Promise<T> {
     const res = await fetch(`http://localhost/api/v1${endpoint}`, {
       method,
@@ -22,10 +31,16 @@ export class CloudHypervisor {
     return res.json() as Promise<T>;
   }
 
+  /**
+   * Resolves the Cloud Hypervisor socket path for a VM name.
+   */
   private sockPath(vmName: string): string {
     return path.join(this.vmDir, vmName, "vmm.sock");
   }
 
+  /**
+   * Checks whether the VMM is reachable for a given VM.
+   */
   async vmmPing(vmName: string): Promise<boolean> {
     try {
       await this.request(this.sockPath(vmName), "/vmm.ping");
@@ -35,30 +50,51 @@ export class CloudHypervisor {
     }
   }
 
+  /**
+   * Retrieves VM configuration and runtime metadata.
+   */
   async vmInfo(vmName: string): Promise<unknown> {
     return this.request(this.sockPath(vmName), "/vm.info");
   }
 
+  /**
+   * Requests a graceful VM shutdown.
+   */
   async vmShutdown(vmName: string): Promise<void> {
     await this.request(this.sockPath(vmName), "/vm.shutdown", "PUT");
   }
 
+  /**
+   * Requests a VM reboot.
+   */
   async vmReboot(vmName: string): Promise<void> {
     await this.request(this.sockPath(vmName), "/vm.reboot", "PUT");
   }
 
+  /**
+   * Pauses a running VM.
+   */
   async vmPause(vmName: string): Promise<void> {
     await this.request(this.sockPath(vmName), "/vm.pause", "PUT");
   }
 
+  /**
+   * Resumes a paused VM.
+   */
   async vmResume(vmName: string): Promise<void> {
     await this.request(this.sockPath(vmName), "/vm.resume", "PUT");
   }
 
+  /**
+   * Retrieves runtime counters for a VM.
+   */
   async vmCounters(vmName: string): Promise<unknown> {
     return this.request(this.sockPath(vmName), "/vm.counters");
   }
 
+  /**
+   * Creates a VM snapshot at the provided destination path.
+   */
   async vmSnapshot(vmName: string, destPath: string): Promise<void> {
     await this.request(this.sockPath(vmName), "/vm.snapshot", "PUT", { destination_url: `file://${destPath}` });
   }

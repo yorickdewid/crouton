@@ -1,6 +1,7 @@
 import path from "path";
 import { mkdir } from "fs/promises";
 import { CreateVMOptionsSchema, CloneVMOptionsSchema, ToggleSchema, type VMProvisioner } from "../vm/create";
+import { DownloadImageSchema, type ImageStore } from "../images/store";
 import type { VMInstance } from "../types";
 import type { SnapshotStore } from "../vm/snapshots";
 import type { VMManager } from "../vm/manager";
@@ -23,6 +24,7 @@ export interface ApiRouterDeps {
   net: NetworkManager;
   wsHub: WsHub;
   snapshots: SnapshotStore;
+  images: ImageStore;
   vmDir: string;
 }
 
@@ -39,7 +41,7 @@ type ChAction = "reboot" | "pause" | "resume" | "shutdown";
  * returned function is just a regular route table — no class needed.
  */
 export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
-  const { vmManager, chApi, provisioner, configStore, net, wsHub, snapshots, vmDir } = deps;
+  const { vmManager, chApi, provisioner, configStore, net, wsHub, snapshots, images, vmDir } = deps;
 
   // ── response helpers ───────────────────────────────────────────────────
 
@@ -81,8 +83,39 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
     }
   };
 
-  /** `GET /api/images` */
-  const listImages = async (): Promise<Response> => json(await provisioner.listImages());
+  /** `GET /api/images` — list image metadata. */
+  const listImages = async (): Promise<Response> => json(await images.list());
+
+  /** `POST /api/images` — download a new image from a URL. */
+  const downloadImage = async (req: Request): Promise<Response> => {
+    let raw: unknown;
+    try { raw = await req.json(); }
+    catch { return json({ error: "request body is not valid JSON" }, 400); }
+
+    const parsed = DownloadImageSchema.safeParse(raw);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const where = issue.path.length ? issue.path.join(".") : "body";
+      return json({ error: `${where}: ${issue.message}` }, 400);
+    }
+
+    try {
+      const info = await images.download(parsed.data);
+      return json(info, 201);
+    } catch (e) {
+      return error(e);
+    }
+  };
+
+  /** `DELETE /api/images/:filename` — remove an image from disk. */
+  const deleteImage = async (filename: string): Promise<Response> => {
+    try {
+      await images.delete(filename);
+      return ok();
+    } catch (e) {
+      return error(e);
+    }
+  };
 
   /** `GET /api/vms/:name` */
   const getVM = async (name: string): Promise<Response> => {
@@ -259,9 +292,13 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
       if (req.method === "POST") return createVM(req);
     }
 
-    if (pathname === "/api/images" && req.method === "GET") {
-      return listImages();
+    if (pathname === "/api/images") {
+      if (req.method === "GET") return listImages();
+      if (req.method === "POST") return downloadImage(req);
     }
+
+    const imageMatch = pathname.match(/^\/api\/images\/([^/]+)$/);
+    if (imageMatch && req.method === "DELETE") return deleteImage(imageMatch[1]);
 
     const vmMatch = pathname.match(/^\/api\/vms\/([^/]+)$/);
     if (vmMatch) {

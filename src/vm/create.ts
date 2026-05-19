@@ -84,8 +84,6 @@ export interface ProvisionerDeps {
  * duplicating an existing VM (clone) — and persists their config.
  */
 export interface VMProvisioner {
-  /** Sorted list of base-image filenames available in `imageDir`. */
-  listImages(): Promise<string[]>;
   /** Provisions a new VM directory from a base image and persists its config. */
   provision(opts: CreateVMOptions): Promise<VMConfig>;
   /**
@@ -109,17 +107,6 @@ export function createProvisioner(deps: ProvisionerDeps): VMProvisioner {
   const { imageDir, vmDir: rootDir, configStore } = deps;
 
   return {
-    async listImages() {
-      try {
-        const entries = await readdir(imageDir);
-        return entries
-          .filter(f => f.endsWith(".qcow2") || f.endsWith(".img") || f.endsWith(".raw"))
-          .sort();
-      } catch {
-        return [];
-      }
-    },
-
     async provision(opts) {
       const { name, image, diskSizeGb, cpus, memoryMb } = opts;
 

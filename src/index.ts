@@ -6,6 +6,7 @@ import { createProvisioner } from "./vm/create";
 import { createDiscoverer } from "./vm/discover";
 import { createSnapshotStore } from "./vm/snapshots";
 import { createHostMetrics } from "./host/metrics";
+import { createImageStore } from "./images/store";
 import { VMManager } from "./vm/manager";
 import { WsHub } from "./server/ws";
 import { createApiRouter } from "./routes/api";
@@ -21,6 +22,7 @@ const provisioner = createProvisioner({
 const discoverer = createDiscoverer({ vmDir: config.vmDir, configStore, chApi, net });
 const snapshots = createSnapshotStore(config.vmDir);
 const hostMetrics = createHostMetrics(config.vmDir);
+const images = createImageStore(config.imageDir);
 
 const seed = await discoverer.discover();
 console.log(`discovered ${seed.length} VM(s): ${seed.map(v => `${v.name}(${v.state})`).join(", ")}`);
@@ -35,7 +37,7 @@ const vmManager = new VMManager({
 
 const wsHub = new WsHub({ vmManager, chApi, net, snapshots, hostMetrics });
 const handleApi = createApiRouter({
-  vmManager, chApi, provisioner, configStore, net, wsHub, snapshots, vmDir: config.vmDir,
+  vmManager, chApi, provisioner, configStore, net, wsHub, snapshots, images, vmDir: config.vmDir,
 });
 
 // Auto-start VMs flagged with `autostart: true` in their crouton.json.

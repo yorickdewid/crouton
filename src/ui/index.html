@@ -600,6 +600,64 @@
       vertical-align: 1px;
     }
 
+    /* images view */
+    .images-wrap { padding: 36px 40px; max-width: 760px; }
+    .images-title {
+      font-size: 22px;
+      font-weight: 600;
+      letter-spacing: -0.01em;
+      margin-bottom: 18px;
+    }
+    .images-list { margin-bottom: 32px; }
+    .image-row {
+      display: grid;
+      grid-template-columns: 1fr 120px 100px 80px;
+      gap: 14px;
+      align-items: baseline;
+      padding: 14px 16px;
+      border: 1px solid var(--border);
+      border-bottom: none;
+      background: var(--surface);
+      font-size: 13px;
+    }
+    .image-row:first-of-type { border-top-left-radius: 1px; }
+    .image-row:last-of-type { border-bottom: 1px solid var(--border); }
+    .image-row + .image-row { border-top: none; }
+    .image-name { font-weight: 500; }
+    .image-format {
+      display: inline-block;
+      font-size: 10px;
+      padding: 2px 8px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--dim);
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+    .image-format.qcow2 { color: var(--accent); border-color: var(--accent); }
+    .image-format.raw, .image-format.img { color: var(--blue); border-color: var(--blue); }
+    .image-format.iso { color: var(--warn); border-color: var(--warn); }
+    .image-size { color: var(--muted); font-variant-numeric: tabular-nums; }
+    .image-delete {
+      background: none;
+      border: 1px solid var(--border);
+      color: var(--muted);
+      font-family: var(--font);
+      font-size: 11px;
+      padding: 5px 10px;
+      cursor: pointer;
+      justify-self: end;
+    }
+    .image-delete:hover { border-color: var(--danger); color: var(--danger); }
+    .images-empty {
+      padding: 32px 16px;
+      text-align: center;
+      color: var(--muted);
+      border: 1px dashed var(--border);
+      font-size: 13px;
+      font-style: italic;
+    }
+
     /* mobile */
     @media (max-width: 700px) {
       .vm-list { width: 100%; border-right: none; }
@@ -847,12 +905,15 @@
       `;
     }
 
-    function VMList({ vms, selected, onSelect, onNew, hidden }) {
+    function VMList({ vms, selected, onSelect, onNew, onOpenImages, hidden }) {
       return html`
         <div class=${"vm-list" + (hidden ? " hidden" : "")}>
           <div class="list-top">
             <span>VMs</span>
-            <button class="new-btn" onClick=${onNew}>+ new</button>
+            <div style="display:flex;gap:8px">
+              <button class="new-btn" onClick=${onOpenImages}>📦 images</button>
+              <button class="new-btn" onClick=${onNew}>+ new</button>
+            </div>
           </div>
           <div class="vm-rows">
             ${vms.map(vm => html`
@@ -1015,14 +1076,14 @@
 
     function CreateForm({ images, onSubmit, onCancel }) {
       const [name, setName] = useState("");
-      const [image, setImage] = useState(images[0] ?? "");
+      const [image, setImage] = useState(images[0]?.filename ?? "");
       const [cpus, setCpus] = useState(2);
       const [memory, setMemory] = useState(2048);
       const [disk, setDisk] = useState(25);
       const [error, setError] = useState("");
       const [busy, setBusy] = useState(false);
 
-      useEffect(() => { if (!image && images.length) setImage(images[0]); }, [images]);
+      useEffect(() => { if (!image && images.length) setImage(images[0].filename); }, [images]);
 
       const submit = async () => {
         setError("");
@@ -1036,6 +1097,8 @@
           setBusy(false);
         }
       };
+
+      const selectedImage = images.find(i => i.filename === image);
 
       return html`
         <div class="form-wrap">
@@ -1051,8 +1114,16 @@
             <select value=${image} onChange=${e => setImage(e.target.value)}>
               ${images.length === 0
                 ? html`<option value="">no images found</option>`
-                : images.map(i => html`<option key=${i} value=${i}>${i}</option>`)}
+                : images.map(i => html`
+                    <option key=${i.filename} value=${i.filename}>
+                      ${i.filename} — ${i.format}, ${fmtBytes(i.sizeBytes)}
+                    </option>`)}
             </select>
+            ${selectedImage?.virtualSizeBytes
+              ? html`<div style="font-size:11px;color:var(--muted);margin-top:4px">
+                  virtual size ${fmtBytes(selectedImage.virtualSizeBytes)} — disk must be ≥ this
+                </div>`
+              : null}
           </div>
           <div class="field-row">
             <div class="field">
@@ -1071,6 +1142,83 @@
           <div class="act-row">
             <button class="btn" disabled=${busy} onClick=${submit}>${busy ? "Provisioning…" : "Create & start"}</button>
             <button class="btn" onClick=${onCancel}>Cancel</button>
+          </div>
+        </div>
+      `;
+    }
+
+    function fmtAge(iso) {
+      const t = Date.parse(iso);
+      if (!t) return "";
+      const s = (Date.now() - t) / 1000;
+      if (s < 60) return "just now";
+      if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+      if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+      const d = Math.floor(s / 86400);
+      if (d < 30) return `${d}d ago`;
+      const mo = Math.floor(d / 30);
+      if (mo < 12) return `${mo}mo ago`;
+      return `${Math.floor(d / 365)}y ago`;
+    }
+
+    function ImagesView({ images, onDownload, onDelete, onClose }) {
+      const [url, setUrl] = useState("");
+      const [filename, setFilename] = useState("");
+      const [error, setError] = useState("");
+      const [busy, setBusy] = useState(false);
+
+      const submit = async () => {
+        setError("");
+        if (!url.trim()) { setError("URL is required."); return; }
+        setBusy(true);
+        try {
+          await onDownload(url.trim(), filename.trim() || undefined);
+          setUrl(""); setFilename("");
+        } catch (e) { setError(e.message); }
+        setBusy(false);
+      };
+
+      return html`
+        <div class="images-wrap">
+          <div class="images-title">Images</div>
+
+          <div class="sh">Download from URL</div>
+          <div class="form-error ${error ? "visible" : ""}" style=${error ? null : "display:none"}>${error}</div>
+          <div class="field">
+            <label>Image URL</label>
+            <input type="url" placeholder="https://cloud-images.ubuntu.com/.../disk.img"
+              value=${url} onInput=${e => setUrl(e.target.value)} disabled=${busy} />
+          </div>
+          <div class="field">
+            <label>Filename (optional)</label>
+            <input type="text" placeholder="leave empty to use URL basename" autocomplete="off" spellcheck=${false}
+              value=${filename} onInput=${e => setFilename(e.target.value)} disabled=${busy} />
+          </div>
+          <div class="act-row" style="margin-top:6px;margin-bottom:32px">
+            <button class="btn primary" disabled=${busy} onClick=${submit}>
+              ${busy ? "Downloading…" : "Download"}
+            </button>
+            <button class="btn" onClick=${onClose} disabled=${busy}>Close</button>
+          </div>
+
+          <div class="sh">On disk (${images.length})</div>
+          <div class="images-list">
+            ${images.length === 0
+              ? html`<div class="images-empty">no images yet — paste a cloud-image URL above</div>`
+              : images.map(img => html`
+                  <div class="image-row" key=${img.filename}>
+                    <div>
+                      <div class="image-name">${img.filename}</div>
+                      <div style="font-size:11px;color:var(--muted);margin-top:3px">
+                        ${fmtAge(img.modifiedAt)}
+                        ${img.virtualSizeBytes ? html` · virtual ${fmtBytes(img.virtualSizeBytes)}` : null}
+                      </div>
+                    </div>
+                    <span class=${"image-format " + img.format}>${img.format}</span>
+                    <span class="image-size">${fmtBytes(img.sizeBytes)}</span>
+                    <button class="image-delete" onClick=${() => onDelete(img.filename)}>delete</button>
+                  </div>
+                `)}
           </div>
         </div>
       `;
@@ -1110,9 +1258,14 @@
       }, [theme]);
 
       // ── images ──
-      useEffect(() => {
-        fetch("/api/images").then(r => r.json()).then(setImages).catch(() => {});
+      const refreshImages = useCallback(async () => {
+        try {
+          const res = await fetch("/api/images");
+          if (res.ok) setImages(await res.json());
+        } catch { /* ignore — UI still functional without */ }
       }, []);
+
+      useEffect(() => { refreshImages(); }, [refreshImages]);
 
       // ── ws ──
       useEffect(() => {
@@ -1234,6 +1387,28 @@
         } catch (e) { toast(e.message, "err"); }
       }, [toast]);
 
+      const onDownloadImage = useCallback(async (url, filename) => {
+        const res = await fetch("/api/images", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(filename ? { url, filename } : { url }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "download failed");
+        toast(`⬇ ${data.filename} (${data.format})`);
+        await refreshImages();
+      }, [toast, refreshImages]);
+
+      const onDeleteImage = useCallback(async (filename) => {
+        if (!confirm(`Delete image "${filename}"? VMs using it as a base are not affected.`)) return;
+        try {
+          const res = await fetch(`/api/images/${encodeURIComponent(filename)}`, { method: "DELETE" });
+          if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "failed"); }
+          toast(`🗑 ${filename} deleted`);
+          await refreshImages();
+        } catch (e) { toast(e.message, "err"); }
+      }, [toast, refreshImages]);
+
       const onCreate = useCallback(async (body) => {
         const res = await fetch("/api/vms", {
           method: "POST",
@@ -1252,7 +1427,13 @@
         [vms, selected],
       );
       const running = vms.filter(v => v.state === "running").length;
-      const subtitle = vm ? vm.name : selected === "create" ? "New VM" : "cloud hypervisor";
+      const subtitle = vm
+        ? vm.name
+        : selected === "create"
+          ? "New VM"
+          : selected === "images"
+            ? "Images"
+            : "cloud hypervisor";
 
       const mobile = isMobile();
       const handlers = { onAct, onStart, onClone, onDelete, onSnap, onSetAutostart };
@@ -1275,16 +1456,23 @@
             selected=${selected}
             hidden=${mobile && !!selected}
             onSelect=${setSelected}
-            onNew=${() => setSelected("create")} />
+            onNew=${() => setSelected("create")}
+            onOpenImages=${() => setSelected("images")} />
 
           <${ToastList} toasts=${toasts} />
 
           <div class=${"detail-wrap" + (mobile && selected ? " visible" : "")}>
             ${selected === "create"
               ? html`<${CreateForm} images=${images} onSubmit=${onCreate} onCancel=${() => setSelected(null)} />`
-              : vm
-                ? html`<${VMDetail} vm=${vm} history=${history.current} handlers=${handlers} />`
-                : html`<${EmptyDetail} />`}
+              : selected === "images"
+                ? html`<${ImagesView}
+                    images=${images}
+                    onDownload=${onDownloadImage}
+                    onDelete=${onDeleteImage}
+                    onClose=${() => setSelected(null)} />`
+                : vm
+                  ? html`<${VMDetail} vm=${vm} history=${history.current} handlers=${handlers} />`
+                  : html`<${EmptyDetail} />`}
           </div>
         </div>
       `;

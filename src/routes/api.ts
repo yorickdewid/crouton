@@ -1,6 +1,7 @@
 import path from "path";
 import { readdir, mkdir } from "fs/promises";
-import { CreateVMOptionsSchema, type VMProvisioner } from "../vm/create";
+import { CreateVMOptionsSchema, CloneVMOptionsSchema, type VMProvisioner } from "../vm/create";
+import type { VMInstance } from "../types";
 import type { VMManager } from "../vm/manager";
 import type { CloudHypervisor } from "../api/ch";
 import type { VMConfigStore } from "../vm/persist";
@@ -106,6 +107,46 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
     }
   };
 
+  /** `POST /api/vms/:name/clone` — duplicate a stopped VM under a new name. */
+  const cloneVM = async (sourceName: string, req: Request): Promise<Response> => {
+    let raw: unknown;
+    try { raw = await req.json(); }
+    catch { return json({ error: "request body is not valid JSON" }, 400); }
+
+    const parsed = CloneVMOptionsSchema.safeParse(raw);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const where = issue.path.length ? issue.path.join(".") : "body";
+      return json({ error: `${where}: ${issue.message}` }, 400);
+    }
+
+    const source = vmManager.getVM(sourceName);
+    if (!source) return json({ error: `source VM '${sourceName}' not found` }, 404);
+    if (source.state !== "stopped") {
+      return json({ error: `source VM is ${source.state}; must be stopped to clone` }, 400);
+    }
+
+    const targetName = parsed.data.name;
+    if (vmManager.getVM(targetName)) {
+      return json({ error: `VM '${targetName}' already exists` }, 400);
+    }
+
+    try {
+      const targetConfig = await provisioner.clone(sourceName, targetName, source.config);
+      const newInstance: VMInstance = {
+        name: targetName,
+        state: "stopped",
+        mac: net.macFor(targetName),
+        config: targetConfig,
+      };
+      vmManager.register(newInstance);
+      wsHub.pushVMs();
+      return json(newInstance, 201);
+    } catch (e) {
+      return error(e);
+    }
+  };
+
   /** `POST /api/vms/:name/start` */
   const startVM = async (name: string): Promise<Response> => {
     const vm = vmManager.getVM(name);
@@ -204,6 +245,9 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
 
     const startMatch = pathname.match(/^\/api\/vms\/([^/]+)\/start$/);
     if (startMatch && req.method === "POST") return startVM(startMatch[1]);
+
+    const cloneMatch = pathname.match(/^\/api\/vms\/([^/]+)\/clone$/);
+    if (cloneMatch && req.method === "POST") return cloneVM(cloneMatch[1], req);
 
     const actionMatch = pathname.match(/^\/api\/vms\/([^/]+)\/(reboot|pause|resume|shutdown)$/);
     if (actionMatch && req.method === "PUT") {

@@ -69,6 +69,18 @@ export class VMManager {
   }
 
   /**
+   * Tracks a new instance without starting it. Used after a VM is created
+   * out-of-band (e.g. cloned from another VM's disk).
+   * @throws If a VM with this name is already tracked.
+   */
+  register(instance: VMInstance): void {
+    if (this.instances.has(instance.name)) {
+      throw new Error(`VM '${instance.name}' is already tracked`);
+    }
+    this.instances.set(instance.name, instance);
+  }
+
+  /**
    * Spawns the Cloud Hypervisor process for a VM and tracks it as `running`.
    * @param vmConfig - Configuration for the VM to start.
    * @returns The tracked {@link VMInstance}.

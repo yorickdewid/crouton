@@ -645,6 +645,7 @@
                  <button class="btn" id="snap-btn" onclick="takeSnap('${vm.name}')">snapshot</button>
                  <button class="btn red" onclick="act('${vm.name}','shutdown',event)">shutdown</button>`
               : `<button class="btn" onclick="startVm('${vm.name}',event)">start</button>
+                 <button class="btn" onclick="cloneVm('${vm.name}',event)">clone</button>
                  <button class="btn red" onclick="deleteVm('${vm.name}',event)">delete</button>`
             }
           </div>
@@ -796,6 +797,24 @@
         });
       } catch (e) { toast(e.message, 'err'); }
       fetchVMs();
+    }
+
+    async function cloneVm(sourceName, ev) {
+      const targetName = prompt(`Clone "${sourceName}" — name for the new VM:`);
+      if (!targetName) return;
+      const btn = ev?.currentTarget;
+      try {
+        await withButton(btn, async () => {
+          const res = await fetch(`/api/vms/${sourceName}/clone`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name: targetName.trim() }),
+          });
+          if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || 'clone failed'); }
+          toast(`🍞 ${sourceName} → ${targetName}`);
+        });
+        selected = targetName.trim();
+      } catch (e) { toast(e.message, 'err'); }
     }
 
     async function deleteVm(name, ev) {

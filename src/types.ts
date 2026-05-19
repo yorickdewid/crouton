@@ -38,4 +38,6 @@ export interface VMInstance {
   startedAt?: Date;
   /** Launch configuration associated with this VM instance. */
   config: VMConfig;
+  /** Snapshot names found on disk, newest first. Populated by the broadcast layer. */
+  snapshots?: string[];
 }

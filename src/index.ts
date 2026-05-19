@@ -4,6 +4,7 @@ import { createNetwork } from "./net/manager";
 import { createConfigStore } from "./vm/persist";
 import { createProvisioner } from "./vm/create";
 import { createDiscoverer } from "./vm/discover";
+import { createSnapshotStore } from "./vm/snapshots";
 import { VMManager } from "./vm/manager";
 import { WsHub } from "./server/ws";
 import { createApiRouter } from "./routes/api";
@@ -17,6 +18,7 @@ const provisioner = createProvisioner({
   configStore,
 });
 const discoverer = createDiscoverer({ vmDir: config.vmDir, configStore, chApi, net });
+const snapshots = createSnapshotStore(config.vmDir);
 
 const seed = await discoverer.discover();
 console.log(`discovered ${seed.length} VM(s): ${seed.map(v => `${v.name}(${v.state})`).join(", ")}`);
@@ -29,9 +31,9 @@ const vmManager = new VMManager({
   firmwareDir: config.firmwareDir,
 });
 
-const wsHub = new WsHub({ vmManager, chApi, net });
+const wsHub = new WsHub({ vmManager, chApi, net, snapshots });
 const handleApi = createApiRouter({
-  vmManager, chApi, provisioner, configStore, net, wsHub, vmDir: config.vmDir,
+  vmManager, chApi, provisioner, configStore, net, wsHub, snapshots, vmDir: config.vmDir,
 });
 
 const ui = await Bun.file(`${import.meta.dir}/ui/index.html`).text();

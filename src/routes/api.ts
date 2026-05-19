@@ -1,7 +1,8 @@
 import path from "path";
-import { readdir, mkdir } from "fs/promises";
+import { mkdir } from "fs/promises";
 import { CreateVMOptionsSchema, CloneVMOptionsSchema, type VMProvisioner } from "../vm/create";
 import type { VMInstance } from "../types";
+import type { SnapshotStore } from "../vm/snapshots";
 import type { VMManager } from "../vm/manager";
 import type { CloudHypervisor } from "../api/ch";
 import type { VMConfigStore } from "../vm/persist";
@@ -21,6 +22,7 @@ export interface ApiRouterDeps {
   configStore: VMConfigStore;
   net: NetworkManager;
   wsHub: WsHub;
+  snapshots: SnapshotStore;
   vmDir: string;
 }
 
@@ -37,7 +39,7 @@ type ChAction = "reboot" | "pause" | "resume" | "shutdown";
  * returned function is just a regular route table — no class needed.
  */
 export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
-  const { vmManager, chApi, provisioner, configStore, net, wsHub, vmDir } = deps;
+  const { vmManager, chApi, provisioner, configStore, net, wsHub, snapshots, vmDir } = deps;
 
   // ── response helpers ───────────────────────────────────────────────────
 
@@ -202,11 +204,7 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
   };
 
   /** `GET /api/vms/:name/snapshots` */
-  const listSnapshots = async (name: string): Promise<Response> => {
-    const dir = path.join(vmDir, name, "snapshots");
-    const entries = await readdir(dir).catch(() => [] as string[]);
-    return json(entries.sort().reverse());
-  };
+  const listSnapshots = async (name: string): Promise<Response> => json(await snapshots.list(name));
 
   /** `POST /api/vms/:name/snapshots` */
   const takeSnapshot = async (name: string): Promise<Response> => {
@@ -218,6 +216,7 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
       const snapDir = path.join(vmDir, name, "snapshots", ts);
       await mkdir(snapDir, { recursive: true });
       await chApi.vmSnapshot(name, snapDir);
+      wsHub.pushVMs();
       return json({ name: ts });
     } catch (e) {
       return error(e);

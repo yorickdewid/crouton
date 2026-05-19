@@ -2,6 +2,7 @@ import type { ServerWebSocket } from "bun";
 import type { VMManager } from "../vm/manager";
 import type { CloudHypervisor } from "../api/ch";
 import type { NetworkManager } from "../net/manager";
+import type { SnapshotStore } from "../vm/snapshots";
 
 type Client = ServerWebSocket<unknown>;
 
@@ -15,6 +16,8 @@ export interface WsHubOptions {
   chApi: CloudHypervisor;
   /** Network helper used to resolve IP addresses from MACs. */
   net: NetworkManager;
+  /** Read-side access to per-VM snapshot directories. */
+  snapshots: SnapshotStore;
   /** Refresh interval in milliseconds. Defaults to 500. */
   refreshInterval?: number;
 }
@@ -30,6 +33,7 @@ export class WsHub {
   private readonly vmManager: VMManager;
   private readonly chApi: CloudHypervisor;
   private readonly net: NetworkManager;
+  private readonly snapshots: SnapshotStore;
   private readonly refreshInterval: number;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
 
@@ -40,6 +44,7 @@ export class WsHub {
     this.vmManager = opts.vmManager;
     this.chApi = opts.chApi;
     this.net = opts.net;
+    this.snapshots = opts.snapshots;
     this.refreshInterval = opts.refreshInterval ?? 500;
   }
 
@@ -77,6 +82,7 @@ export class WsHub {
         const ip = await this.net.macToIp(vm.mac);
         if (ip) vm.ip = ip;
       }
+      vm.snapshots = await this.snapshots.list(vm.name);
     }
     this.send({ type: "vms", data: vms });
   }

@@ -530,6 +530,30 @@
       r: 2.5;
     }
 
+    /* tabs */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      border-bottom: 1px solid var(--border);
+      margin: 18px 0 24px;
+    }
+    .tab {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-family: var(--font);
+      font-size: 13px;
+      padding: 10px 16px 11px;
+      cursor: pointer;
+      position: relative;
+      margin-bottom: -1px;
+      border-bottom: 2px solid transparent;
+      letter-spacing: 0.03em;
+      transition: color 0.15s, border-color 0.15s;
+    }
+    .tab:hover { color: var(--dim); }
+    .tab.active { color: var(--text); border-bottom-color: var(--accent); }
+
     /* settings rows */
     .setting-row {
       display: flex;
@@ -1089,6 +1113,10 @@
       // every WS push. Recomputing on each render is cheap (≤40 samples).
       const r = alive ? ratesFrom(history, vm.name) : null;
 
+      const [tab, setTab] = useState("overview");
+      // Reset to Overview whenever the selected VM changes.
+      useEffect(() => { setTab("overview"); }, [vm.name]);
+
       return html`
         <div class="detail">
           <div class="detail-head">
@@ -1110,50 +1138,58 @@
 
           <${ActionRow} vm=${vm} ...${handlers} />
 
-          <div class="stat-grid" style="margin-top:24px">
-            <${StatCard} label="vCPU" value=${vm.config.cpus} />
-            <${StatCard} label="Memory" value=${vm.config.memoryMb} unit="MB" />
-            <${StatCard} label="Boot" value=${vm.config.bootMode} text />
-            <${StatCard} label="Disks" value=${vm.config.disks.length} />
+          <div class="tabs">
+            <button class=${"tab" + (tab === "overview" ? " active" : "")}
+              onClick=${() => setTab("overview")}>Overview</button>
+            <button class=${"tab" + (tab === "settings" ? " active" : "")}
+              onClick=${() => setTab("settings")}>Settings</button>
           </div>
 
-          ${alive && r ? html`
-            <div class="sh">Live I/O</div>
-            <div class="io-row">
-              <${IOCard}
-                label="network"
-                rateText=${html`↓${fmtRate(r.current.rx)} ↑${fmtRate(r.current.tx)}`}
-                values=${r.net}
-                color="var(--blue)"
-                gradId="grad-net" />
-              <${IOCard}
-                label="disk"
-                rateText=${`r:${fmtRate(r.current.r)} w:${fmtRate(r.current.w)}`}
-                values=${r.blk}
-                color="var(--accent)"
-                gradId="grad-disk" />
+          ${tab === "overview" ? html`
+            <div class="stat-grid">
+              <${StatCard} label="vCPU" value=${vm.config.cpus} />
+              <${StatCard} label="Memory" value=${vm.config.memoryMb} unit="MB" />
+              <${StatCard} label="Boot" value=${vm.config.bootMode} text />
+              <${StatCard} label="Disks" value=${vm.config.disks.length} />
             </div>
-          ` : null}
 
-          <div class="sh">Disks</div>
-          <div style="margin-bottom:24px">
-            ${vm.config.disks.map((d, i) => html`
-              <div class="disk-row" key=${i}>
-                <span class="disk-idx">disk${i}</span>
-                <span class="disk-name">${d}</span>
+            ${alive && r ? html`
+              <div class="sh">Live I/O</div>
+              <div class="io-row">
+                <${IOCard}
+                  label="network"
+                  rateText=${html`↓${fmtRate(r.current.rx)} ↑${fmtRate(r.current.tx)}`}
+                  values=${r.net}
+                  color="var(--blue)"
+                  gradId="grad-net" />
+                <${IOCard}
+                  label="disk"
+                  rateText=${`r:${fmtRate(r.current.r)} w:${fmtRate(r.current.w)}`}
+                  values=${r.blk}
+                  color="var(--accent)"
+                  gradId="grad-disk" />
               </div>
-            `)}
-          </div>
+            ` : null}
 
-          <div class="sh">Snapshots</div>
-          <div style="margin-bottom:24px">
-            ${(vm.snapshots?.length ?? 0) === 0
-              ? html`<div class="snap-none">no snapshots yet</div>`
-              : vm.snapshots.map(s => html`<div class="snap-row" key=${s}><span>📸 ${s.replace(/_/g, " ")}</span></div>`)}
-          </div>
+            <div class="sh">Disks</div>
+            <div style="margin-bottom:24px">
+              ${vm.config.disks.map((d, i) => html`
+                <div class="disk-row" key=${i}>
+                  <span class="disk-idx">disk${i}</span>
+                  <span class="disk-name">${d}</span>
+                </div>
+              `)}
+            </div>
 
-          <div class="sh">Settings</div>
-          <${SettingsForm} vm=${vm} handlers=${handlers} />
+            <div class="sh">Snapshots</div>
+            <div>
+              ${(vm.snapshots?.length ?? 0) === 0
+                ? html`<div class="snap-none">no snapshots yet</div>`
+                : vm.snapshots.map(s => html`<div class="snap-row" key=${s}><span>📸 ${s.replace(/_/g, " ")}</span></div>`)}
+            </div>
+          ` : html`
+            <${SettingsForm} vm=${vm} handlers=${handlers} />
+          `}
         </div>
       `;
     }

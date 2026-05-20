@@ -1372,6 +1372,24 @@ packages:
       return `${Math.floor(d / 365)}y ago`;
     }
 
+    function ImageRow({ img, onDelete }) {
+      const meta = img.virtualSizeBytes
+        ? `${fmtAge(img.modifiedAt)} · virtual ${fmtBytes(img.virtualSizeBytes)}`
+        : fmtAge(img.modifiedAt);
+      const format = img.format || "unknown";
+      return html`
+        <div class="image-row">
+          <div>
+            <div class="image-name">${img.filename}</div>
+            <div style="font-size:11px;color:var(--muted);margin-top:3px">${meta}</div>
+          </div>
+          <span class=${"image-format " + format}>${format}</span>
+          <span class="image-size">${fmtBytes(img.sizeBytes)}</span>
+          <button class="image-delete" onClick=${() => onDelete(img.filename)}>delete</button>
+        </div>
+      `;
+    }
+
     function ImagesView({ images, onDownload, onDelete, onClose }) {
       const [url, setUrl] = useState("");
       const [filename, setFilename] = useState("");
@@ -1389,12 +1407,16 @@ packages:
         setBusy(false);
       };
 
+      const list = images.length === 0
+        ? html`<div class="images-empty">no images yet — paste a cloud-image URL above</div>`
+        : images.map(img => html`<${ImageRow} key=${img.filename} img=${img} onDelete=${onDelete} />`);
+
       return html`
         <div class="images-wrap">
           <div class="images-title">Images</div>
 
           <div class="sh">Download from URL</div>
-          <div class="form-error ${error ? "visible" : ""}" style=${error ? null : "display:none"}>${error}</div>
+          ${error ? html`<div class="form-error visible">${error}</div>` : null}
           <div class="field">
             <label>Image URL</label>
             <input type="url" placeholder="https://cloud-images.ubuntu.com/.../disk.img"
@@ -1413,26 +1435,7 @@ packages:
           </div>
 
           <div class="sh">On disk (${images.length})</div>
-          <div class="images-list">
-            ${images.length === 0
-              ? html`<div class="images-empty">no images yet — paste a cloud-image URL above</div>`
-              : images.map(img => {
-                  const meta = img.virtualSizeBytes
-                    ? `${fmtAge(img.modifiedAt)} · virtual ${fmtBytes(img.virtualSizeBytes)}`
-                    : fmtAge(img.modifiedAt);
-                  return html`
-                    <div class="image-row" key=${img.filename}>
-                      <div>
-                        <div class="image-name">${img.filename}</div>
-                        <div style="font-size:11px;color:var(--muted);margin-top:3px">${meta}</div>
-                      </div>
-                      <span class=${"image-format " + (img.format || "unknown")}>${img.format || "unknown"}</span>
-                      <span class="image-size">${fmtBytes(img.sizeBytes)}</span>
-                      <button class="image-delete" onClick=${() => onDelete(img.filename)}>delete</button>
-                    </div>
-                  `;
-                })}
-          </div>
+          <div class="images-list">${list}</div>
         </div>
       `;
     }

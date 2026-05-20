@@ -4,6 +4,7 @@ import { $ } from "bun";
 import { z } from "zod";
 import type { VMConfig } from "../types";
 import type { VMConfigStore } from "./persist";
+import { buildSeedIso } from "./cloud-init";
 
 /**
  * Shared name pattern: alphanumeric-leading, plus `_` and `-`, max 63 chars.
@@ -35,6 +36,13 @@ export const CreateVMOptionsSchema = z.object({
   cpus: z.number().int().min(1).max(256),
   /** Memory size in megabytes. */
   memoryMb: z.number().int().min(64).max(4_194_304),
+  /**
+   * Optional `#cloud-config` user-data body. If present, the provisioner
+   * writes `user-data` + `meta-data` into the VM directory, builds a
+   * `seed.iso` via `cloud-localds`, and attaches it as a read-only disk.
+   * Empty / omitted skips cloud-init entirely.
+   */
+  cloudInit: z.string().max(16384).optional(),
 });
 
 /**
@@ -108,7 +116,7 @@ export function createProvisioner(deps: ProvisionerDeps): VMProvisioner {
 
   return {
     async provision(opts) {
-      const { name, image, diskSizeGb, cpus, memoryMb } = opts;
+      const { name, image, diskSizeGb, cpus, memoryMb, cloudInit } = opts;
 
       const vmDir = path.join(rootDir, name);
       const diskPath = path.join(vmDir, "disk0.qcow2");
@@ -126,12 +134,19 @@ export function createProvisioner(deps: ProvisionerDeps): VMProvisioner {
         await copyFile(imagePath, diskPath);
         await $`qemu-img resize ${diskPath} ${diskSizeGb}G`;
 
+        const disks = ["disk0.qcow2"];
+        const userData = cloudInit?.trim();
+        if (userData) {
+          await buildSeedIso(vmDir, name, userData);
+          disks.push("seed.iso");
+        }
+
         const vmConfig: VMConfig = {
           name,
           cpus,
           memoryMb,
           bootMode: "uefi",
-          disks: ["disk0.qcow2"],
+          disks,
         };
 
         await configStore.write(vmConfig);

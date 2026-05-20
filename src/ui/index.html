@@ -403,7 +403,7 @@
 
     .field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 18px; }
     .field label { font-size: 11px; color: var(--muted); }
-    .field input, .field select {
+    .field input, .field select, .field textarea {
       background: var(--surface);
       border: 1px solid var(--border);
       color: var(--text);
@@ -413,10 +413,11 @@
       outline: none;
       width: 100%;
       -webkit-appearance: none;
+      resize: vertical;
     }
-    .field input, .field select { transition: border-color 0.15s; }
-    .field input:focus, .field select:focus { border-color: var(--accent); outline: 1px solid rgba(78, 238, 131, 0.2); outline-offset: -2px; }
-    [data-theme="light"] .field input:focus, [data-theme="light"] .field select:focus { outline-color: rgba(74, 124, 15, 0.25); }
+    .field input, .field select, .field textarea { transition: border-color 0.15s; }
+    .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); outline: 1px solid rgba(78, 238, 131, 0.2); outline-offset: -2px; }
+    [data-theme="light"] .field input:focus, [data-theme="light"] .field select:focus, [data-theme="light"] .field textarea:focus { outline-color: rgba(74, 124, 15, 0.25); }
     .field select option { background: var(--surface); }
     .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 
@@ -1048,12 +1049,49 @@
       `;
     }
 
+    const DEFAULT_CLOUD_INIT = `#cloud-config
+
+# Grow the root partition + filesystem to fill the resized disk
+growpart:
+  mode: auto
+  devices: ['/']
+resize_rootfs: true
+
+# Configure a swapfile
+swap:
+  filename: /swapfile
+  size: 2G
+  maxsize: 4G
+
+package_update: true
+package_upgrade: false
+
+packages:
+  - curl
+
+# Uncomment and customise to add a user with SSH access:
+# users:
+#   - default
+#   - name: yourname
+#     groups: [sudo]
+#     shell: /bin/bash
+#     sudo: ['ALL=(ALL) NOPASSWD:ALL']
+#     lock_passwd: true
+#     ssh_authorized_keys:
+#       - ssh-ed25519 AAAA... your-key-here
+
+# runcmd:
+#   - [ sh, -c, "echo provisioned" ]
+`;
+
     function CreateForm({ images, onSubmit, onCancel }) {
       const [name, setName] = useState("");
       const [image, setImage] = useState(images[0]?.filename ?? "");
       const [cpus, setCpus] = useState(2);
       const [memory, setMemory] = useState(2048);
       const [disk, setDisk] = useState(25);
+      const [cloudInit, setCloudInit] = useState(DEFAULT_CLOUD_INIT);
+      const [showCloudInit, setShowCloudInit] = useState(false);
       const [error, setError] = useState("");
       const [busy, setBusy] = useState(false);
 
@@ -1065,7 +1103,15 @@
         if (!image) { setError("Select a base image."); return; }
         setBusy(true);
         try {
-          await onSubmit({ name: name.trim(), image, cpus, memoryMb: memory, diskSizeGb: disk });
+          const body = {
+            name: name.trim(),
+            image,
+            cpus,
+            memoryMb: memory,
+            diskSizeGb: disk,
+          };
+          if (cloudInit.trim()) body.cloudInit = cloudInit;
+          await onSubmit(body);
         } catch (e) {
           setError(e.message);
           setBusy(false);
@@ -1113,6 +1159,32 @@
             <label>Disk size (GB)</label>
             <input type="number" min="1" value=${disk} onInput=${e => setDisk(+e.target.value)} />
           </div>
+
+          <div class="field">
+            <label style="display:flex;justify-content:space-between;align-items:center">
+              <span>Cloud-init <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— user-data, applied via seed.iso</span></span>
+              <button type="button" onClick=${() => setShowCloudInit(s => !s)}
+                style="background:none;border:none;color:var(--muted);font-family:var(--font);font-size:11px;cursor:pointer;letter-spacing:0.08em">
+                ${showCloudInit ? "hide ▴" : "show ▾"}
+              </button>
+            </label>
+            ${showCloudInit ? html`
+              <textarea
+                value=${cloudInit}
+                onInput=${e => setCloudInit(e.target.value)}
+                spellcheck=${false}
+                style="min-height:240px;line-height:1.45;font-family:var(--font);font-size:12px;tab-size:2"
+              ></textarea>
+              <div style="font-size:11px;color:var(--muted);margin-top:4px">
+                hostname is auto-set from the VM name in meta-data. Leave blank to skip cloud-init entirely.
+              </div>
+            ` : html`
+              <div style="font-size:12px;color:var(--muted);padding:8px 0">
+                ${cloudInit.trim() ? "Default template loaded — click show to edit." : "Empty — no cloud-init applied."}
+              </div>
+            `}
+          </div>
+
           <div class="act-row">
             <button class="btn" disabled=${busy} onClick=${submit}>${busy ? "Provisioning…" : "Create & start"}</button>
             <button class="btn" onClick=${onCancel}>Cancel</button>

@@ -537,11 +537,42 @@
       justify-content: space-between;
       padding: 12px 0;
       border-bottom: 1px solid var(--border);
+      gap: 16px;
     }
     .setting-row:first-child { border-top: 1px solid var(--border); }
-    .setting-text { display: flex; flex-direction: column; gap: 3px; }
+    .setting-text { display: flex; flex-direction: column; gap: 3px; flex: 1; min-width: 0; }
     .setting-label { font-size: 13px; color: var(--text); }
     .setting-hint { font-size: 11px; color: var(--muted); }
+    .setting-input {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 13px;
+      padding: 6px 10px;
+      outline: none;
+      width: 110px;
+      text-align: right;
+      -webkit-appearance: none;
+      font-variant-numeric: tabular-nums;
+      transition: border-color 0.15s;
+    }
+    .setting-input:focus { border-color: var(--accent); }
+    select.setting-input { text-align: left; padding-right: 8px; }
+
+    .settings-warn {
+      background: rgba(241, 196, 15, 0.08);
+      border: 1px solid var(--warn);
+      border-radius: 0;
+      padding: 9px 14px;
+      font-size: 12px;
+      color: var(--warn);
+      margin-bottom: 14px;
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    [data-theme="light"] .settings-warn { background: rgba(176, 100, 0, 0.06); }
 
     .toggle {
       background: var(--surface2);
@@ -952,6 +983,106 @@
       `;
     }
 
+    function SettingsForm({ vm, handlers }) {
+      const cfg = vm.config;
+      const [cpus, setCpus] = useState(cfg.cpus ?? 2);
+      const [memoryMb, setMemoryMb] = useState(cfg.memoryMb ?? 2048);
+      const [bootMode, setBootMode] = useState(cfg.bootMode === "unknown" ? "uefi" : cfg.bootMode);
+      const [kernelPath, setKernelPath] = useState(cfg.kernelPath ?? "");
+      const [saving, setSaving] = useState(false);
+      const [savedTick, setSavedTick] = useState(0);
+
+      // Re-sync local form when the server pushes a new vm.config
+      // (e.g. after another tab edits). Skip if the user is actively
+      // editing — judged by `saving` flag.
+      useEffect(() => {
+        setCpus(cfg.cpus ?? 2);
+        setMemoryMb(cfg.memoryMb ?? 2048);
+        setBootMode(cfg.bootMode === "unknown" ? "uefi" : cfg.bootMode);
+        setKernelPath(cfg.kernelPath ?? "");
+      }, [cfg.cpus, cfg.memoryMb, cfg.bootMode, cfg.kernelPath, savedTick]);
+
+      const dirty =
+        cpus !== (cfg.cpus ?? 2) ||
+        memoryMb !== (cfg.memoryMb ?? 2048) ||
+        bootMode !== (cfg.bootMode === "unknown" ? "uefi" : cfg.bootMode) ||
+        (bootMode === "direct" && kernelPath !== (cfg.kernelPath ?? ""));
+
+      const save = async () => {
+        setSaving(true);
+        const patch = { cpus, memoryMb, bootMode };
+        if (bootMode === "direct") patch.kernelPath = kernelPath;
+        try {
+          await handlers.onUpdateConfig(vm.name, patch);
+          setSavedTick(t => t + 1);
+        } finally { setSaving(false); }
+      };
+
+      const running = vm.state === "running";
+
+      return html`
+        ${running ? html`
+          <div class="settings-warn">
+            <span>⚠</span>
+            <span>VM is running. CPU / memory / boot changes apply on next start.</span>
+          </div>
+        ` : null}
+
+        <div class="setting-row">
+          <div class="setting-text">
+            <span class="setting-label">CPUs</span>
+          </div>
+          <input class="setting-input" type="number" min="1" max="256"
+            value=${cpus} onInput=${e => setCpus(+e.target.value)} />
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-text">
+            <span class="setting-label">Memory (MB)</span>
+          </div>
+          <input class="setting-input" type="number" min="64" step="64"
+            value=${memoryMb} onInput=${e => setMemoryMb(+e.target.value)} />
+        </div>
+
+        <div class="setting-row">
+          <div class="setting-text">
+            <span class="setting-label">Boot mode</span>
+          </div>
+          <select class="setting-input" value=${bootMode} onChange=${e => setBootMode(e.target.value)}>
+            <option value="uefi">uefi</option>
+            <option value="direct">direct</option>
+          </select>
+        </div>
+
+        ${bootMode === "direct" ? html`
+          <div class="setting-row">
+            <div class="setting-text">
+              <span class="setting-label">Kernel filename</span>
+              <span class="setting-hint">Relative to the VM directory (e.g. <code>vmlinuz</code>).</span>
+            </div>
+            <input class="setting-input" type="text" style="width:180px;text-align:left"
+              value=${kernelPath} onInput=${e => setKernelPath(e.target.value)} />
+          </div>
+        ` : null}
+
+        <div class="setting-row">
+          <div class="setting-text">
+            <span class="setting-label">Autostart on boot</span>
+            <span class="setting-hint">Start this VM automatically when Crouton itself starts.</span>
+          </div>
+          <${Toggle}
+            value=${!!cfg.autostart}
+            onChange=${v => handlers.onSetAutostart(vm.name, v)} />
+        </div>
+
+        <div class="act-row" style="margin-top:18px">
+          <button class="btn ${dirty ? "primary" : ""}" disabled=${!dirty || saving} onClick=${save}>
+            ${saving ? "Saving…" : dirty ? "Save changes" : "No changes"}
+          </button>
+        </div>
+      `;
+    }
+
     function VMDetail({ vm, history, handlers }) {
       const alive = vm.state === "running";
       // No useMemo: history is a stable Map ref but its *contents* mutate on
@@ -1022,17 +1153,7 @@
           </div>
 
           <div class="sh">Settings</div>
-          <div>
-            <div class="setting-row">
-              <div class="setting-text">
-                <span class="setting-label">Autostart on boot</span>
-                <span class="setting-hint">Start this VM automatically when Crouton itself starts.</span>
-              </div>
-              <${Toggle}
-                value=${!!vm.config.autostart}
-                onChange=${v => handlers.onSetAutostart(vm.name, v)} />
-            </div>
-          </div>
+          <${SettingsForm} vm=${vm} handlers=${handlers} />
         </div>
       `;
     }
@@ -1423,6 +1544,17 @@ packages:
         } catch (e) { toast(e.message, "err"); }
       }, [toast]);
 
+      const onUpdateConfig = useCallback(async (name, patch) => {
+        const res = await fetch(`/api/vms/${name}/config`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(patch),
+        });
+        const data = await res.json();
+        if (!res.ok) { toast(data.error || "save failed", "err"); throw new Error(data.error || "save failed"); }
+        toast(`💾 ${name} saved`);
+      }, [toast]);
+
       const onDownloadImage = useCallback(async (url, filename) => {
         const res = await fetch("/api/images", {
           method: "POST",
@@ -1472,7 +1604,7 @@ packages:
             : "cloud hypervisor";
 
       const mobile = isMobile();
-      const handlers = { onAct, onStart, onClone, onDelete, onSnap, onSetAutostart };
+      const handlers = { onAct, onStart, onClone, onDelete, onSnap, onSetAutostart, onUpdateConfig };
 
       return html`
         <${Header}

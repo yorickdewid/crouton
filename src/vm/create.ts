@@ -72,6 +72,25 @@ export const ToggleSchema = z.object({
 });
 
 /**
+ * Zod schema for `PUT /api/vms/:name/config` — a partial patch of the
+ * persisted {@link VMConfig}. Every field is optional; only the keys
+ * present in the body are merged on top of the existing config. The
+ * VM's `name` and `disks` are deliberately not editable here.
+ */
+export const VMConfigPatchSchema = z.object({
+  cpus:       z.number().int().min(1).max(256).optional(),
+  memoryMb:   z.number().int().min(64).max(4_194_304).optional(),
+  bootMode:   z.enum(["direct", "uefi"]).optional(),
+  kernelPath: z.string().max(255).optional(),
+  autostart:  z.boolean().optional(),
+});
+
+/**
+ * Resolved patch body after schema parsing.
+ */
+export type VMConfigPatch = z.infer<typeof VMConfigPatchSchema>;
+
+/**
  * Entries inside a source VM directory that must NOT be carried over to a clone.
  * Runtime sockets, snapshot archives, and the config file are all rewritten or
  * regenerated for the new VM.

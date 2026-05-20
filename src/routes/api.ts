@@ -1,6 +1,6 @@
 import path from "path";
 import { mkdir } from "fs/promises";
-import { CreateVMOptionsSchema, CloneVMOptionsSchema, ToggleSchema, type VMProvisioner } from "../vm/create";
+import { CreateVMOptionsSchema, CloneVMOptionsSchema, ToggleSchema, VMConfigPatchSchema, type VMProvisioner } from "../vm/create";
 import { DownloadImageSchema, type ImageStore } from "../images/store";
 import type { VMInstance } from "../types";
 import type { SnapshotStore } from "../vm/snapshots";
@@ -206,6 +206,40 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
     return ok();
   };
 
+  /**
+   * `PUT /api/vms/:name/config` — patch the persisted VMConfig.
+   * Accepts a partial body; only the keys present are merged. The change
+   * is written to `crouton.json` and mirrored on the in-memory instance.
+   *
+   * If the VM is running, the *live* VMM keeps its previous values; the
+   * patch only affects the next boot. The UI shows a warning in that case.
+   */
+  const updateConfig = async (name: string, req: Request): Promise<Response> => {
+    let raw: unknown;
+    try { raw = await req.json(); }
+    catch { return json({ error: "request body is not valid JSON" }, 400); }
+
+    const parsed = VMConfigPatchSchema.safeParse(raw);
+    if (!parsed.success) {
+      const issue = parsed.error.issues[0];
+      const where = issue.path.length ? issue.path.join(".") : "body";
+      return json({ error: `${where}: ${issue.message}` }, 400);
+    }
+
+    const vm = vmManager.getVM(name);
+    if (!vm) return json({ error: "not found" }, 404);
+
+    const updated = { ...vm.config, ...parsed.data };
+    try {
+      await configStore.write(updated);
+      vm.config = updated;
+    } catch (e) {
+      return error(e);
+    }
+    wsHub.pushVMs();
+    return json(updated);
+  };
+
   /** `POST /api/vms/:name/start` */
   const startVM = async (name: string): Promise<Response> => {
     const vm = vmManager.getVM(name);
@@ -311,6 +345,9 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
 
     const autostartMatch = pathname.match(/^\/api\/vms\/([^/]+)\/autostart$/);
     if (autostartMatch && req.method === "PUT") return setAutostart(autostartMatch[1], req);
+
+    const configMatch = pathname.match(/^\/api\/vms\/([^/]+)\/config$/);
+    if (configMatch && req.method === "PUT") return updateConfig(configMatch[1], req);
 
     const actionMatch = pathname.match(/^\/api\/vms\/([^/]+)\/(reboot|pause|resume|shutdown)$/);
     if (actionMatch && req.method === "PUT") {

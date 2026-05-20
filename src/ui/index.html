@@ -692,9 +692,17 @@
 
     /* mobile */
     @media (max-width: 700px) {
-      .vm-list { width: 100%; border-right: none; }
+      /* Let the page scroll naturally; nested scroll on flex children
+         is fragile on mobile (no min-height:0) and fights the browser. */
+      html, body { height: auto; min-height: 100%; overflow: visible; overflow-y: auto; }
+      body { overflow-x: hidden; }
+      header { position: sticky; top: 0; }
+      .layout { overflow: visible; }
+
+      .vm-list { width: 100%; border-right: none; overflow: visible; }
       .vm-list.hidden { display: none; }
-      .detail-wrap { display: none; width: 100%; }
+      .vm-rows { overflow: visible; }
+      .detail-wrap { display: none; width: 100%; overflow: visible; }
       .detail-wrap.visible { display: block; }
       .hero { grid-template-columns: repeat(2, 1fr); }
       .hero-cell:nth-child(2) { border-right: none; }

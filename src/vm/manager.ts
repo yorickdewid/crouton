@@ -122,15 +122,15 @@ export class VMManager {
 
   /* ─── pass-throughs to the runner ─────────────────────────────────── */
 
-  reboot(name: string): Promise<void>   { return this.runner.reboot(name); }
-  pause(name: string): Promise<void>    { return this.runner.pause(name); }
-  resume(name: string): Promise<void>   { return this.runner.resume(name); }
+  reboot(name: string): Promise<void> { return this.runner.reboot(name); }
+  pause(name: string): Promise<void> { return this.runner.pause(name); }
+  resume(name: string): Promise<void> { return this.runner.resume(name); }
   /** Try graceful shutdown; runner falls back to a SIGTERM internally. */
   shutdown(name: string): Promise<void> { return this.runner.stop(name); }
   snapshot(name: string, destPath: string): Promise<void> { return this.runner.snapshot(name, destPath); }
   counters(name: string): Promise<unknown> { return this.runner.counters(name); }
-  info(name: string): Promise<unknown>     { return this.runner.info(name); }
-  ping(name: string): Promise<boolean>     { return this.runner.ping(name); }
+  info(name: string): Promise<unknown> { return this.runner.info(name); }
+  ping(name: string): Promise<boolean> { return this.runner.ping(name); }
 
   /* ─── internal ────────────────────────────────────────────────────── */
 

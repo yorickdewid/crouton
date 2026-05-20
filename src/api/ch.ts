@@ -59,11 +59,11 @@ export function createCloudHypervisor(vmDir: string): CloudHypervisor {
       }
     },
 
-    vmInfo:    (vmName) => request(vmName, "/vm.info"),
+    vmInfo: (vmName) => request(vmName, "/vm.info"),
     vmShutdown: async (vmName) => { await request(vmName, "/vm.shutdown", "PUT"); },
-    vmReboot:   async (vmName) => { await request(vmName, "/vm.reboot",   "PUT"); },
-    vmPause:    async (vmName) => { await request(vmName, "/vm.pause",    "PUT"); },
-    vmResume:   async (vmName) => { await request(vmName, "/vm.resume",   "PUT"); },
+    vmReboot: async (vmName) => { await request(vmName, "/vm.reboot", "PUT"); },
+    vmPause: async (vmName) => { await request(vmName, "/vm.pause", "PUT"); },
+    vmResume: async (vmName) => { await request(vmName, "/vm.resume", "PUT"); },
     vmCounters: (vmName) => request(vmName, "/vm.counters"),
     vmSnapshot: async (vmName, destPath) => {
       await request(vmName, "/vm.snapshot", "PUT", { destination_url: `file://${destPath}` });

@@ -78,11 +78,11 @@ export const ToggleSchema = z.object({
  * VM's `name` and `disks` are deliberately not editable here.
  */
 export const VMConfigPatchSchema = z.object({
-  cpus:       z.number().int().min(1).max(256).optional(),
-  memoryMb:   z.number().int().min(64).max(4_194_304).optional(),
-  bootMode:   z.enum(["direct", "uefi"]).optional(),
+  cpus: z.number().int().min(1).max(256).optional(),
+  memoryMb: z.number().int().min(64).max(4_194_304).optional(),
+  bootMode: z.enum(["direct", "uefi"]).optional(),
   kernelPath: z.string().max(255).optional(),
-  autostart:  z.boolean().optional(),
+  autostart: z.boolean().optional(),
 });
 
 /**

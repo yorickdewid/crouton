@@ -12,17 +12,17 @@ import { VMManager } from "./vm/manager";
 import { WsHub } from "./server/ws";
 import { createApiRouter } from "./routes/api";
 
-const chApi       = createCloudHypervisor(config.vmDir);
-const net         = createNetwork(config.bridgeInterface);
+const chApi = createCloudHypervisor(config.vmDir);
+const net = createNetwork(config.bridgeInterface);
 const configStore = createConfigStore(config.vmDir);
 const provisioner = createProvisioner({ imageDir: config.imageDir, vmDir: config.vmDir, configStore });
-const snapshots   = createSnapshotStore(config.vmDir);
+const snapshots = createSnapshotStore(config.vmDir);
 const hostMetrics = createHostMetrics(config.vmDir);
-const images      = createImageStore(config.imageDir);
+const images = createImageStore(config.imageDir);
 
 // The runner is the only consumer of chApi + net for spawn-side work.
 // When croutond exists it will be replaced by createRemoteRunner(...).
-const runner    = createLocalRunner({ chApi, net, vmDir: config.vmDir, chBinary: config.chBinary });
+const runner = createLocalRunner({ chApi, net, vmDir: config.vmDir, chBinary: config.chBinary });
 const discoverer = createDiscoverer({ vmDir: config.vmDir, configStore, runner, net });
 
 const seed = await discoverer.discover();

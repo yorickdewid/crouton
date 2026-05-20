@@ -117,13 +117,13 @@ export function createLocalRunner(deps: LocalRunnerDeps): VMRunner {
       }
     },
 
-    reboot:   (name) => chApi.vmReboot(name),
-    pause:    (name) => chApi.vmPause(name),
-    resume:   (name) => chApi.vmResume(name),
+    reboot: (name) => chApi.vmReboot(name),
+    pause: (name) => chApi.vmPause(name),
+    resume: (name) => chApi.vmResume(name),
     snapshot: (name, dest) => chApi.vmSnapshot(name, dest),
     counters: (name) => chApi.vmCounters(name),
-    info:     (name) => chApi.vmInfo(name),
-    ping:     (name) => chApi.vmmPing(name),
+    info: (name) => chApi.vmInfo(name),
+    ping: (name) => chApi.vmmPing(name),
 
     async listRunning() {
       const out: VMRuntime[] = [];

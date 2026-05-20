@@ -1416,20 +1416,22 @@ packages:
           <div class="images-list">
             ${images.length === 0
               ? html`<div class="images-empty">no images yet — paste a cloud-image URL above</div>`
-              : images.map(img => html`
-                  <div class="image-row" key=${img.filename}>
-                    <div>
-                      <div class="image-name">${img.filename}</div>
-                      <div style="font-size:11px;color:var(--muted);margin-top:3px">
-                        ${fmtAge(img.modifiedAt)}
-                        ${img.virtualSizeBytes ? html` · virtual ${fmtBytes(img.virtualSizeBytes)}` : null}
+              : images.map(img => {
+                  const meta = img.virtualSizeBytes
+                    ? `${fmtAge(img.modifiedAt)} · virtual ${fmtBytes(img.virtualSizeBytes)}`
+                    : fmtAge(img.modifiedAt);
+                  return html`
+                    <div class="image-row" key=${img.filename}>
+                      <div>
+                        <div class="image-name">${img.filename}</div>
+                        <div style="font-size:11px;color:var(--muted);margin-top:3px">${meta}</div>
                       </div>
+                      <span class=${"image-format " + (img.format || "unknown")}>${img.format || "unknown"}</span>
+                      <span class="image-size">${fmtBytes(img.sizeBytes)}</span>
+                      <button class="image-delete" onClick=${() => onDelete(img.filename)}>delete</button>
                     </div>
-                    <span class=${"image-format " + img.format}>${img.format}</span>
-                    <span class="image-size">${fmtBytes(img.sizeBytes)}</span>
-                    <button class="image-delete" onClick=${() => onDelete(img.filename)}>delete</button>
-                  </div>
-                `)}
+                  `;
+                })}
           </div>
         </div>
       `;

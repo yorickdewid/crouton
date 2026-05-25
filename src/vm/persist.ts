@@ -31,7 +31,11 @@ interface LegacyVMConfig extends Partial<VMConfig> {
  *   they're reading from.
  */
 function normalizeConfig(raw: LegacyVMConfig, fallbackId: string): VMConfig {
-  const id = raw.id ?? fallbackId;
+  // Directory name is the authoritative identity. We always overwrite the
+  // file's `id` field with the dirname so that `mv <old> <new>` is a
+  // valid migration — the moved directory adopts its new id on next
+  // read, and the next write persists the corrected id.
+  const id = fallbackId;
   const label = raw.label ?? raw.name ?? id;
   const bootMode = (raw.bootMode as string) === "unknown" ? "uefi" : (raw.bootMode ?? "uefi");
   const tags = Array.isArray(raw.tags)

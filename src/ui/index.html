@@ -248,18 +248,25 @@
       gap: 12px;
     }
     .detail-name { font-size: 19px; font-weight: 600; letter-spacing: -0.005em; }
-    .detail-id {
-      font-family: var(--font-mono);
-      font-size: 10px;
-      color: var(--muted);
-      letter-spacing: 0;
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: 3px;
-      padding: 1px 5px;
+    .detail-tags {
       margin-left: auto;
-      user-select: all;
+      display: flex;
+      gap: 4px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+      max-width: 50%;
     }
+    .detail-id-line {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--muted);
+      margin-bottom: 14px;
+      cursor: pointer;
+      user-select: all;
+      display: inline-block;
+      transition: color 0.12s;
+    }
+    .detail-id-line:hover { color: var(--dim); }
 
     .detail-ip-row {
       display: flex;
@@ -1380,13 +1387,24 @@
       // Reset to Overview whenever the selected VM changes.
       useEffect(() => { setTab("overview"); }, [vm.id]);
 
+      const tags = vm.config.tags ?? [];
+      const copyId = async () => {
+        try { await navigator.clipboard.writeText(vm.id); handlers.toast?.(`copied ${vm.id}`); }
+        catch { /* clipboard blocked — user can still select-copy */ }
+      };
+
       return html`
         <div class="detail">
           <div class="detail-head">
             <span class="detail-name">${vm.label}</span>
             <${StateBadge} state=${vm.state} />
-            <span class="detail-id" title="stable id">${vm.id}</span>
+            ${tags.length > 0 ? html`
+              <div class="detail-tags">
+                ${tags.map(t => html`<span class="tag-chip" key=${t}>${t}</span>`)}
+              </div>
+            ` : null}
           </div>
+          <div class="detail-id-line" title="stable id — click to copy" onClick=${copyId}>${vm.id}</div>
 
           ${vm.ip
             ? html`
@@ -1980,7 +1998,7 @@ packages:
             : "cloud hypervisor";
 
       const mobile = isMobile();
-      const handlers = { onAct, onStart, onClone, onDelete, onSnap, onSetAutostart, onUpdateConfig, onUpdateTags, onRename };
+      const handlers = { onAct, onStart, onClone, onDelete, onSnap, onSetAutostart, onUpdateConfig, onUpdateTags, onRename, toast };
 
       return html`
         <${Header}

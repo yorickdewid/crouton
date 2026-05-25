@@ -4,8 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>crouton</title>
+  <link rel="preconnect" href="https://rsms.me/">
+  <link rel="stylesheet" href="https://rsms.me/inter/inter.css">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    code, kbd, samp { font-family: var(--font-mono); font-size: 0.95em; }
 
     :root {
       /* dark — Linear/Retool internal-tool: dense, gray + muted blue, hairline */
@@ -23,7 +26,11 @@
       --warn:    #d4a93a;
       --danger:  #e0716a;
       --radius:  4px;
-      --font: 'Berkeley Mono', 'Fira Code', 'Cascadia Code', ui-monospace, monospace;
+      --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, ui-sans-serif, sans-serif;
+      --font-mono: ui-monospace, 'SF Mono', 'JetBrains Mono', 'Fira Code', Menlo, Consolas, monospace;
+    }
+    @supports (font-variation-settings: normal) {
+      :root { --font: 'InterVariable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, ui-sans-serif, sans-serif; }
     }
 
     [data-theme="light"] {
@@ -49,8 +56,12 @@
       background: var(--bg);
       color: var(--text);
       font-family: var(--font);
+      font-feature-settings: 'cv11', 'ss01', 'ss03';
       font-size: 13px;
       line-height: 1.45;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
       display: flex;
       flex-direction: column;
       overflow: hidden;
@@ -208,6 +219,7 @@
       animation: fadein 0.5s ease-out;
     }
     .empty-art {
+      font-family: var(--font-mono);
       font-size: 14px;
       line-height: 1.25;
       color: var(--border);
@@ -235,8 +247,8 @@
       margin-bottom: 18px;
       font-size: 12px;
     }
-    .detail-ip-row .ip { font-size: 14px; color: var(--text); font-weight: 500; font-variant-numeric: tabular-nums; }
-    .detail-ip-row .mac { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+    .detail-ip-row .ip { font-family: var(--font-mono); font-size: 13px; color: var(--text); font-weight: 500; }
+    .detail-ip-row .mac { font-family: var(--font-mono); color: var(--muted); font-size: 12px; }
     .detail-ip-row .nope { color: var(--muted); font-size: 12px; }
 
     /* stat grid */
@@ -301,7 +313,7 @@
     }
     .disk-row:first-child { border-top: 1px solid var(--border); }
     .disk-idx { color: var(--muted); width: 44px; flex-shrink: 0; font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; }
-    .disk-name { flex: 1; font-variant-numeric: tabular-nums; }
+    .disk-name { flex: 1; font-family: var(--font-mono); font-size: 12px; }
     .disk-size { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 
     /* snapshots */
@@ -611,7 +623,7 @@
       font-size: 12px;
     }
     .image-row:last-child { border-bottom: none; }
-    .image-name { font-weight: 500; font-size: 13px; }
+    .image-name { font-family: var(--font-mono); font-weight: 500; font-size: 12px; }
     .image-format {
       display: inline-block;
       font-size: 10px;
@@ -1296,7 +1308,7 @@ packages:
                 value=${cloudInit}
                 onInput=${e => setCloudInit(e.target.value)}
                 spellcheck=${false}
-                style="min-height:240px;line-height:1.45;font-family:var(--font);font-size:12px;tab-size:2"
+                style="min-height:240px;line-height:1.45;font-family:var(--font-mono);font-size:12px;tab-size:2"
               ></textarea>
               <div style="font-size:11px;color:var(--muted);margin-top:4px">
                 hostname is auto-set from the VM name in meta-data. Leave blank to skip cloud-init entirely.

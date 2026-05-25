@@ -35,8 +35,9 @@ export type ApiHandler = (req: Request, pathname: string) => Promise<Response | 
 type ChAction = "reboot" | "pause" | "resume" | "shutdown";
 
 /**
- * Builds the `/api/...` dispatcher. All handlers close over `deps`, so the
- * returned function is just a regular route table — no class needed.
+ * Builds the `/api/...` dispatcher. All VM-scoped routes are keyed by the
+ * stable `id` (matching the on-disk directory name); the user-facing
+ * `label` is only ever read/written through the VMConfig patch route.
  */
 export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
   const { vmManager, provisioner, configStore, net, wsHub, snapshots, images, vmDir } = deps;
@@ -115,24 +116,24 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
     }
   };
 
-  /** `GET /api/vms/:name` */
-  const getVM = async (name: string): Promise<Response> => {
-    const vm = vmManager.getVM(name);
+  /** `GET /api/vms/:id` */
+  const getVM = async (id: string): Promise<Response> => {
+    const vm = vmManager.getVM(id);
     if (!vm) return json({ error: "not found" }, 404);
     const ip = await net.macToIp(vm.mac);
     if (ip) vm.ip = ip;
     try {
-      const info = await vmManager.info(name);
+      const info = await vmManager.info(id);
       return json({ ...vm, chInfo: info });
     } catch {
       return json(vm);
     }
   };
 
-  /** `DELETE /api/vms/:name` — wipe the VM directory (must be stopped). */
-  const deleteVM = async (name: string): Promise<Response> => {
+  /** `DELETE /api/vms/:id` — wipe the VM directory (must be stopped). */
+  const deleteVM = async (id: string): Promise<Response> => {
     try {
-      await vmManager.deleteVM(name);
+      await vmManager.deleteVM(id);
       wsHub.pushVMs();
       return ok();
     } catch (e) {
@@ -140,8 +141,8 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
     }
   };
 
-  /** `POST /api/vms/:name/clone` — duplicate a stopped VM under a new name. */
-  const cloneVM = async (sourceName: string, req: Request): Promise<Response> => {
+  /** `POST /api/vms/:id/clone` — duplicate a stopped VM under a new label. */
+  const cloneVM = async (sourceId: string, req: Request): Promise<Response> => {
     let raw: unknown;
     try { raw = await req.json(); }
     catch { return json({ error: "request body is not valid JSON" }, 400); }
@@ -153,23 +154,19 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
       return json({ error: `${where}: ${issue.message}` }, 400);
     }
 
-    const source = vmManager.getVM(sourceName);
-    if (!source) return json({ error: `source VM '${sourceName}' not found` }, 404);
+    const source = vmManager.getVM(sourceId);
+    if (!source) return json({ error: `source VM '${sourceId}' not found` }, 404);
     if (source.state !== "stopped") {
       return json({ error: `source VM is ${source.state}; must be stopped to clone` }, 400);
     }
 
-    const targetName = parsed.data.name;
-    if (vmManager.getVM(targetName)) {
-      return json({ error: `VM '${targetName}' already exists` }, 400);
-    }
-
     try {
-      const targetConfig = await provisioner.clone(sourceName, targetName, source.config);
+      const targetConfig = await provisioner.clone(sourceId, parsed.data.label, source.config);
       const newInstance: VMInstance = {
-        name: targetName,
+        id: targetConfig.id,
+        label: targetConfig.label,
         state: "stopped",
-        mac: net.macFor(targetName),
+        mac: net.macFor(targetConfig.id),
         config: targetConfig,
       };
       vmManager.register(newInstance);
@@ -180,8 +177,8 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
     }
   };
 
-  /** `PUT /api/vms/:name/autostart` — toggle the autostart flag. */
-  const setAutostart = async (name: string, req: Request): Promise<Response> => {
+  /** `PUT /api/vms/:id/autostart` — toggle the autostart flag. */
+  const setAutostart = async (id: string, req: Request): Promise<Response> => {
     let raw: unknown;
     try { raw = await req.json(); }
     catch { return json({ error: "request body is not valid JSON" }, 400); }
@@ -193,7 +190,7 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
       return json({ error: `${where}: ${issue.message}` }, 400);
     }
 
-    const vm = vmManager.getVM(name);
+    const vm = vmManager.getVM(id);
     if (!vm) return json({ error: "not found" }, 404);
 
     vm.config.autostart = parsed.data.value;
@@ -207,14 +204,16 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
   };
 
   /**
-   * `PUT /api/vms/:name/config` — patch the persisted VMConfig.
+   * `PUT /api/vms/:id/config` — patch the persisted VMConfig.
    * Accepts a partial body; only the keys present are merged. The change
    * is written to `crouton.json` and mirrored on the in-memory instance.
    *
    * If the VM is running, the *live* VMM keeps its previous values; the
    * patch only affects the next boot. The UI shows a warning in that case.
+   * The exception is `label`, which only lives on the persisted config
+   * and the in-memory instance — no live VMM state to reconcile.
    */
-  const updateConfig = async (name: string, req: Request): Promise<Response> => {
+  const updateConfig = async (id: string, req: Request): Promise<Response> => {
     let raw: unknown;
     try { raw = await req.json(); }
     catch { return json({ error: "request body is not valid JSON" }, 400); }
@@ -226,13 +225,15 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
       return json({ error: `${where}: ${issue.message}` }, 400);
     }
 
-    const vm = vmManager.getVM(name);
+    const vm = vmManager.getVM(id);
     if (!vm) return json({ error: "not found" }, 404);
 
     const updated = { ...vm.config, ...parsed.data };
     try {
       await configStore.write(updated);
       vm.config = updated;
+      // Keep the instance's top-level label in sync with the persisted one.
+      vm.label = updated.label;
     } catch (e) {
       return error(e);
     }
@@ -240,18 +241,19 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
     return json(updated);
   };
 
-  /** `POST /api/vms/:name/start` */
-  const startVM = async (name: string): Promise<Response> => {
-    const vm = vmManager.getVM(name);
+  /** `POST /api/vms/:id/start` */
+  const startVM = async (id: string): Promise<Response> => {
+    const vm = vmManager.getVM(id);
     if (!vm) return json({ error: "not found" }, 404);
     if (vm.state === "running") return json({ error: "already running" }, 400);
 
     try {
-      let cfg = await configStore.read(name);
+      let cfg = await configStore.read(id);
       if (!cfg) {
         cfg = {
           ...vm.config,
-          name,
+          id,
+          label: vm.label,
           cpus: vm.config.cpus ?? DEFAULT_CPUS,
           memoryMb: vm.config.memoryMb ?? DEFAULT_MEMORY_MB,
         };
@@ -265,17 +267,17 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
     }
   };
 
-  /** `PUT /api/vms/:name/{reboot|pause|resume|shutdown}` */
-  const runAction = async (name: string, action: ChAction): Promise<Response> => {
+  /** `PUT /api/vms/:id/{reboot|pause|resume|shutdown}` */
+  const runAction = async (id: string, action: ChAction): Promise<Response> => {
     try {
       switch (action) {
-        case "reboot": await vmManager.reboot(name); break;
-        case "pause": await vmManager.pause(name); break;
-        case "resume": await vmManager.resume(name); break;
+        case "reboot": await vmManager.reboot(id); break;
+        case "pause": await vmManager.pause(id); break;
+        case "resume": await vmManager.resume(id); break;
         // `shutdown` goes via VMManager.stopVM, which delegates to the
         // runner; the runner tries CH's vm.shutdown and falls back to
         // SIGTERM internally so the process always dies.
-        case "shutdown": await vmManager.stopVM(name); break;
+        case "shutdown": await vmManager.stopVM(id); break;
       }
       wsHub.pushVMs();
       return ok();
@@ -284,29 +286,29 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
     }
   };
 
-  /** `GET /api/vms/:name/counters` */
-  const getCounters = async (name: string): Promise<Response> => {
+  /** `GET /api/vms/:id/counters` */
+  const getCounters = async (id: string): Promise<Response> => {
     try {
-      const data = await vmManager.counters(name);
+      const data = await vmManager.counters(id);
       return json({ ts: Date.now(), counters: data });
     } catch (e) {
       return error(e);
     }
   };
 
-  /** `GET /api/vms/:name/snapshots` */
-  const listSnapshots = async (name: string): Promise<Response> => json(await snapshots.list(name));
+  /** `GET /api/vms/:id/snapshots` */
+  const listSnapshots = async (id: string): Promise<Response> => json(await snapshots.list(id));
 
-  /** `POST /api/vms/:name/snapshots` */
-  const takeSnapshot = async (name: string): Promise<Response> => {
-    const vm = vmManager.getVM(name);
+  /** `POST /api/vms/:id/snapshots` */
+  const takeSnapshot = async (id: string): Promise<Response> => {
+    const vm = vmManager.getVM(id);
     if (!vm) return json({ error: "not found" }, 404);
     if (vm.state !== "running") return json({ error: "VM must be running to snapshot" }, 400);
     try {
       const ts = new Date().toISOString().replace(/[:.]/g, "-").replace("T", "_").slice(0, 19);
-      const snapDir = path.join(vmDir, name, "snapshots", ts);
+      const snapDir = path.join(vmDir, id, "snapshots", ts);
       await mkdir(snapDir, { recursive: true });
-      await vmManager.snapshot(name, snapDir);
+      await vmManager.snapshot(id, snapDir);
       wsHub.pushVMs();
       return json({ name: ts });
     } catch (e) {
@@ -332,9 +334,9 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
 
     const vmMatch = pathname.match(/^\/api\/vms\/([^/]+)$/);
     if (vmMatch) {
-      const name = vmMatch[1];
-      if (req.method === "GET") return getVM(name);
-      if (req.method === "DELETE") return deleteVM(name);
+      const id = vmMatch[1];
+      if (req.method === "GET") return getVM(id);
+      if (req.method === "DELETE") return deleteVM(id);
     }
 
     const startMatch = pathname.match(/^\/api\/vms\/([^/]+)\/start$/);
@@ -359,9 +361,9 @@ export function createApiRouter(deps: ApiRouterDeps): ApiHandler {
 
     const snapshotsMatch = pathname.match(/^\/api\/vms\/([^/]+)\/snapshots$/);
     if (snapshotsMatch) {
-      const name = snapshotsMatch[1];
-      if (req.method === "GET") return listSnapshots(name);
-      if (req.method === "POST") return takeSnapshot(name);
+      const id = snapshotsMatch[1];
+      if (req.method === "GET") return listSnapshots(id);
+      if (req.method === "POST") return takeSnapshot(id);
     }
 
     return null;

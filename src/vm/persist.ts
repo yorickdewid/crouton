@@ -3,27 +3,61 @@ import { readFile, writeFile } from "fs/promises";
 import type { VMConfig } from "../types";
 
 /**
- * Returns a copy of `cfg` normalised for in-memory use:
- * - `tags`: canonical form (lowercased, trimmed, deduplicated, sorted).
- * - `bootMode`: legacy `"unknown"` rewritten to `"uefi"` since that's the
- *   spawn-time fallback anyway. Keeps the type honest and the UI truthful.
+ * Shape of a legacy `crouton.json` written before the id+label split.
+ * Used only for the migration path in {@link normalizeConfig}; production
+ * code never reads this shape directly.
  */
-function normalizeConfig(cfg: VMConfig): VMConfig {
-  const raw = cfg.tags;
-  const tags = Array.isArray(raw)
-    ? Array.from(new Set(raw.map((t) => String(t).trim().toLowerCase()).filter(Boolean))).sort()
-    : [];
-  const bootMode = (cfg.bootMode as string) === "unknown" ? "uefi" : cfg.bootMode;
-  return { ...cfg, tags, bootMode };
+interface LegacyVMConfig extends Partial<VMConfig> {
+  /** Legacy single field that meant both identity and display. */
+  name?: string;
 }
 
 /**
- * Persists per-VM configuration to `<vmDir>/<name>/crouton.json`.
+ * Returns a copy of `cfg` in canonical in-memory form:
+ *
+ * - `id` is filled from the directory name (`fallbackId`) when missing —
+ *   that's exactly what every legacy VM's identity is anyway.
+ * - `label` is filled from legacy `name`, then `id`, when missing.
+ * - The legacy `name` field is dropped on the way out.
+ * - `bootMode` legacy `"unknown"` is rewritten to `"uefi"`.
+ * - `tags` are lowercased, trimmed, deduplicated, sorted.
+ *
+ * Applied on both read and write so callers can stay ignorant of the
+ * migration. Idempotent.
+ *
+ * @param raw - Parsed JSON or in-memory config; may be legacy-shaped.
+ * @param fallbackId - Directory name to use as `id` when the file
+ *   predates the split. Caller's responsibility to pass the directory
+ *   they're reading from.
+ */
+function normalizeConfig(raw: LegacyVMConfig, fallbackId: string): VMConfig {
+  const id = raw.id ?? fallbackId;
+  const label = raw.label ?? raw.name ?? id;
+  const bootMode = (raw.bootMode as string) === "unknown" ? "uefi" : (raw.bootMode ?? "uefi");
+  const tags = Array.isArray(raw.tags)
+    ? Array.from(new Set(raw.tags.map((t) => String(t).trim().toLowerCase()).filter(Boolean))).sort()
+    : [];
+
+  return {
+    id,
+    label,
+    cpus: raw.cpus,
+    memoryMb: raw.memoryMb,
+    bootMode,
+    kernelPath: raw.kernelPath,
+    disks: raw.disks ?? [],
+    autostart: raw.autostart,
+    tags,
+  };
+}
+
+/**
+ * Persists per-VM configuration to `<vmDir>/<id>/crouton.json`.
  * Treated as the authoritative config when present.
  */
 export interface VMConfigStore {
   /** Reads the persisted config for a VM, or `undefined` if absent. */
-  read(name: string): Promise<VMConfig | undefined>;
+  read(id: string): Promise<VMConfig | undefined>;
   /** Writes the config for a VM, overwriting any existing file. */
   write(cfg: VMConfig): Promise<void>;
 }
@@ -33,20 +67,20 @@ export interface VMConfigStore {
  * @param vmDir - Root directory containing per-VM folders.
  */
 export function createConfigStore(vmDir: string): VMConfigStore {
-  const pathFor = (name: string): string => path.join(vmDir, name, "crouton.json");
+  const pathFor = (id: string): string => path.join(vmDir, id, "crouton.json");
 
   return {
-    async read(name) {
+    async read(id) {
       try {
-        const text = await readFile(pathFor(name), "utf-8");
-        return normalizeConfig(JSON.parse(text) as VMConfig);
+        const text = await readFile(pathFor(id), "utf-8");
+        return normalizeConfig(JSON.parse(text) as LegacyVMConfig, id);
       } catch {
         return undefined;
       }
     },
 
     async write(cfg) {
-      await writeFile(pathFor(cfg.name), JSON.stringify(normalizeConfig(cfg), null, 2));
+      await writeFile(pathFor(cfg.id), JSON.stringify(normalizeConfig(cfg, cfg.id), null, 2));
     },
   };
 }

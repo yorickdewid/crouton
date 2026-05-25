@@ -84,7 +84,7 @@ export class WsHub {
         const ip = await this.net.macToIp(vm.mac);
         if (ip) vm.ip = ip;
       }
-      vm.snapshots = await this.snapshots.list(vm.name);
+      vm.snapshots = await this.snapshots.list(vm.id);
     }
     this.send({ type: "vms", data: vms });
   }
@@ -125,13 +125,13 @@ export class WsHub {
 
   /**
    * Polls counters for every running VM and broadcasts them as a single
-   * map keyed by VM name. Errors on a single VM don't drop the rest.
+   * map keyed by VM id. Errors on a single VM don't drop the rest.
    */
   private async pushCounters(): Promise<void> {
     const data: Record<string, unknown> = {};
     for (const vm of this.vmManager.listVMs()) {
       if (vm.state !== "running") continue;
-      try { data[vm.name] = await this.vmManager.counters(vm.name); } catch { /* skip this VM */ }
+      try { data[vm.id] = await this.vmManager.counters(vm.id); } catch { /* skip this VM */ }
     }
     this.send({ type: "counters", ts: Date.now(), data });
   }

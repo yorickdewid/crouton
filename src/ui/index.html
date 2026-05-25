@@ -186,6 +186,7 @@
 
     .vm-row-left { min-width: 0; }
     .vm-row-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .vm-row-name .vm-row-suffix { color: var(--muted); font-weight: 400; font-size: 11px; font-family: var(--font-mono); margin-left: 4px; }
     .vm-row-sub { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
     .badge {
@@ -247,6 +248,18 @@
       gap: 12px;
     }
     .detail-name { font-size: 19px; font-weight: 600; letter-spacing: -0.005em; }
+    .detail-id {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: 0;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      padding: 1px 5px;
+      margin-left: auto;
+      user-select: all;
+    }
 
     .detail-ip-row {
       display: flex;
@@ -1096,7 +1109,7 @@
       `;
     }
 
-    function VMRow({ vm, active, onClick }) {
+    function VMRow({ vm, active, onClick, showIdSuffix }) {
       const sub = `${vm.config.bootMode} · ${vm.config.disks.length}d${vm.ip ? " · " + vm.ip : ""}`;
       const cls = ["vm-row"];
       if (active) cls.push("active");
@@ -1104,11 +1117,15 @@
       const tags = vm.config.tags ?? [];
       const visibleTags = tags.slice(0, 3);
       const overflow = tags.length - visibleTags.length;
+      // Trailing 4 chars of the ULID — enough to disambiguate identical
+      // labels in the sidebar without showing the full id.
+      const idSuffix = vm.id.slice(-4);
       return html`
-        <div class=${cls.join(" ")} onClick=${onClick}>
+        <div class=${cls.join(" ")} onClick=${onClick} title=${vm.id}>
           <div class="vm-row-left">
             <div class="vm-row-name">
-              ${vm.name}
+              ${vm.label}
+              ${showIdSuffix ? html`<span class="vm-row-suffix">·${idSuffix}</span>` : null}
               ${vm.config.autostart ? html`<span class="auto-mark" title="autostarts on boot"><${Icon} icon=${Zap} size=${11} strokeWidth=${2.5} /></span>` : null}
             </div>
             <div class="vm-row-sub">${sub}</div>
@@ -1128,6 +1145,9 @@
       const filtered = activeTags.length === 0
         ? vms
         : vms.filter(vm => activeTags.every(t => (vm.config.tags ?? []).includes(t)));
+      // Identify labels that appear more than once in the visible list —
+      // those rows get a trailing id suffix so the user can tell them apart.
+      const labelCounts = filtered.reduce((m, v) => m.set(v.label, (m.get(v.label) ?? 0) + 1), new Map());
       return html`
         <div class=${"vm-list" + (hidden ? " hidden" : "")}>
           ${allTags.length > 0 ? html`
@@ -1157,10 +1177,11 @@
               </div>
             ` : filtered.map(vm => html`
               <${VMRow}
-                key=${vm.name}
+                key=${vm.id}
                 vm=${vm}
-                active=${selected === vm.name}
-                onClick=${() => onSelect(vm.name)} />
+                active=${selected === vm.id}
+                showIdSuffix=${labelCounts.get(vm.label) > 1}
+                onClick=${() => onSelect(vm.id)} />
             `)}
           </div>
         </div>
@@ -1200,24 +1221,25 @@
       if (alive) {
         return html`
           <div class="act-row top">
-            <button class="btn primary" onClick=${e => onSnap(vm.name, e)}><${Icon} icon=${Camera} /> snapshot</button>
-            <button class="btn" onClick=${e => onAct(vm.name, "reboot", e)}><${Icon} icon=${RotateCcw} /> reboot</button>
-            <button class="btn" onClick=${e => onAct(vm.name, "pause", e)}><${Icon} icon=${Pause} /> pause</button>
-            <button class="btn red" onClick=${e => onAct(vm.name, "shutdown", e)}><${Icon} icon=${Power} /> shutdown</button>
+            <button class="btn primary" onClick=${e => onSnap(vm.id, vm.label, e)}><${Icon} icon=${Camera} /> snapshot</button>
+            <button class="btn" onClick=${e => onAct(vm.id, vm.label, "reboot", e)}><${Icon} icon=${RotateCcw} /> reboot</button>
+            <button class="btn" onClick=${e => onAct(vm.id, vm.label, "pause", e)}><${Icon} icon=${Pause} /> pause</button>
+            <button class="btn red" onClick=${e => onAct(vm.id, vm.label, "shutdown", e)}><${Icon} icon=${Power} /> shutdown</button>
           </div>
         `;
       }
       return html`
         <div class="act-row top">
-          <button class="btn primary" onClick=${e => onStart(vm.name, e)}><${Icon} icon=${Play} /> start</button>
-          <button class="btn" onClick=${e => onClone(vm.name, e)}><${Icon} icon=${Copy} /> clone</button>
-          <button class="btn red" onClick=${e => onDelete(vm.name, e)}><${Icon} icon=${Trash2} /> delete</button>
+          <button class="btn primary" onClick=${e => onStart(vm.id, vm.label, e)}><${Icon} icon=${Play} /> start</button>
+          <button class="btn" onClick=${e => onClone(vm.id, vm.label, e)}><${Icon} icon=${Copy} /> clone</button>
+          <button class="btn red" onClick=${e => onDelete(vm.id, vm.label, e)}><${Icon} icon=${Trash2} /> delete</button>
         </div>
       `;
     }
 
     function SettingsForm({ vm, handlers }) {
       const cfg = vm.config;
+      const [label, setLabel] = useState(vm.label);
       const [cpus, setCpus] = useState(cfg.cpus ?? 2);
       const [memoryMb, setMemoryMb] = useState(cfg.memoryMb ?? 2048);
       const [bootMode, setBootMode] = useState(cfg.bootMode);
@@ -1229,11 +1251,12 @@
       // (e.g. after another tab edits). Skip if the user is actively
       // editing — judged by `saving` flag.
       useEffect(() => {
+        setLabel(vm.label);
         setCpus(cfg.cpus ?? 2);
         setMemoryMb(cfg.memoryMb ?? 2048);
         setBootMode(cfg.bootMode);
         setKernelPath(cfg.kernelPath ?? "");
-      }, [cfg.cpus, cfg.memoryMb, cfg.bootMode, cfg.kernelPath, savedTick]);
+      }, [vm.label, cfg.cpus, cfg.memoryMb, cfg.bootMode, cfg.kernelPath, savedTick]);
 
       const dirty =
         cpus !== (cfg.cpus ?? 2) ||
@@ -1246,9 +1269,16 @@
         const patch = { cpus, memoryMb, bootMode };
         if (bootMode === "direct") patch.kernelPath = kernelPath;
         try {
-          await handlers.onUpdateConfig(vm.name, patch);
+          await handlers.onUpdateConfig(vm.id, vm.label, patch);
           setSavedTick(t => t + 1);
         } finally { setSaving(false); }
+      };
+
+      // Label commits on Enter or blur — inline-save semantics like tags.
+      const commitLabel = () => {
+        const t = label.trim();
+        if (!t || t === vm.label) { setLabel(vm.label); return; }
+        handlers.onRename(vm.id, vm.label, t);
       };
 
       const running = vm.state === "running";
@@ -1261,6 +1291,18 @@
           </div>
         ` : null}
 
+        <div class="setting-row">
+          <div class="setting-text">
+            <span class="setting-label">Label</span>
+            <span class="setting-hint">Friendly name. Doesn't affect the disk, MAC, or any path.</span>
+          </div>
+          <input class="setting-input" type="text" style="width:220px;text-align:left"
+            value=${label}
+            onInput=${e => setLabel(e.target.value)}
+            onKeyDown=${e => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }}
+            onBlur=${commitLabel} />
+        </div>
+
         <div class="setting-row" style="align-items:flex-start;padding-top:14px;padding-bottom:14px">
           <div class="setting-text">
             <span class="setting-label">Tags</span>
@@ -1269,7 +1311,7 @@
           <div style="flex:1;max-width:360px">
             <${TagEditor}
               value=${cfg.tags ?? []}
-              onChange=${tags => handlers.onUpdateTags(vm.name, tags)} />
+              onChange=${tags => handlers.onUpdateTags(vm.id, tags)} />
           </div>
         </div>
 
@@ -1317,7 +1359,7 @@
           </div>
           <${Toggle}
             value=${!!cfg.autostart}
-            onChange=${v => handlers.onSetAutostart(vm.name, v)} />
+            onChange=${v => handlers.onSetAutostart(vm.id, vm.label, v)} />
         </div>
 
         <div class="act-row" style="margin-top:18px">
@@ -1332,17 +1374,18 @@
       const alive = vm.state === "running";
       // No useMemo: history is a stable Map ref but its *contents* mutate on
       // every WS push. Recomputing on each render is cheap (≤40 samples).
-      const r = alive ? ratesFrom(history, vm.name) : null;
+      const r = alive ? ratesFrom(history, vm.id) : null;
 
       const [tab, setTab] = useState("overview");
       // Reset to Overview whenever the selected VM changes.
-      useEffect(() => { setTab("overview"); }, [vm.name]);
+      useEffect(() => { setTab("overview"); }, [vm.id]);
 
       return html`
         <div class="detail">
           <div class="detail-head">
-            <span class="detail-name">${vm.name}</span>
+            <span class="detail-name">${vm.label}</span>
             <${StateBadge} state=${vm.state} />
+            <span class="detail-id" title="stable id">${vm.id}</span>
           </div>
 
           ${vm.ip
@@ -1463,7 +1506,7 @@ packages:
 `;
 
     function CreateForm({ images, onSubmit, onCancel }) {
-      const [name, setName] = useState("");
+      const [label, setLabel] = useState("");
       const [image, setImage] = useState(images[0]?.filename ?? "");
       const [cpus, setCpus] = useState(2);
       const [memory, setMemory] = useState(2048);
@@ -1478,12 +1521,12 @@ packages:
 
       const submit = async () => {
         setError("");
-        if (!name.trim()) { setError("Name is required."); return; }
+        if (!label.trim()) { setError("Label is required."); return; }
         if (!image) { setError("Select a base image."); return; }
         setBusy(true);
         try {
           const body = {
-            name: name.trim(),
+            label: label.trim(),
             image,
             cpus,
             memoryMb: memory,
@@ -1505,9 +1548,9 @@ packages:
           <div class="form-title">New VM</div>
           <div class="form-error ${error ? "visible" : ""}" style=${error ? null : "display:none"}>${error}</div>
           <div class="field">
-            <label>Name</label>
-            <input type="text" placeholder="my-vm" autocomplete="off" spellcheck=${false}
-              value=${name} onInput=${e => setName(e.target.value)} />
+            <label>Label <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— friendly name, can be renamed later</span></label>
+            <input type="text" placeholder="web · ubuntu-test · ..." autocomplete="off" spellcheck=${false}
+              value=${label} onInput=${e => setLabel(e.target.value)} />
           </div>
           <div class="field">
             <label>Base image</label>
@@ -1755,7 +1798,8 @@ packages:
 
       // Drop selection if the VM disappears (e.g. delete)
       useEffect(() => {
-        if (selected && selected !== "create" && !vms.find(v => v.name === selected)) {
+        if (selected && selected !== "create" && selected !== "images"
+            && !vms.find(v => v.id === selected)) {
           setSelected(null);
         }
       }, [vms, selected]);
@@ -1769,59 +1813,62 @@ packages:
       }, []);
 
       // ── action handlers ──
-      const onAct = useCallback(async (name, action, ev) => {
+      // All handlers take (id, label, ev). The route uses id; toasts show
+      // label so the user sees their friendly name, not the ULID.
+      const onAct = useCallback(async (id, label, action, ev) => {
         try {
           await withButton(ev, async () => {
-            const res = await fetch(`/api/vms/${name}/${action}`, { method: "PUT" });
+            const res = await fetch(`/api/vms/${id}/${action}`, { method: "PUT" });
             if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "failed"); }
-            toast(`${name} — ${ACTION_VERBS[action] || action}`);
+            toast(`${label} — ${ACTION_VERBS[action] || action}`);
           });
         } catch (e) { toast(e.message, "err"); }
       }, [toast]);
 
-      const onStart = useCallback(async (name, ev) => {
+      const onStart = useCallback(async (id, label, ev) => {
         try {
           await withButton(ev, async () => {
-            const res = await fetch(`/api/vms/${name}/start`, { method: "POST" });
+            const res = await fetch(`/api/vms/${id}/start`, { method: "POST" });
             if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "failed to start"); }
-            toast(`🚀 ${name} starting…`);
+            toast(`🚀 ${label} starting…`);
           });
         } catch (e) { toast(e.message, "err"); }
       }, [toast]);
 
-      const onDelete = useCallback(async (name, ev) => {
-        if (!confirm(`Delete VM "${name}"?\nThis removes its disk and config permanently.`)) return;
+      const onDelete = useCallback(async (id, label, ev) => {
+        if (!confirm(`Delete VM "${label}"?\nThis removes its disk and config permanently.`)) return;
         try {
           await withButton(ev, async () => {
-            const res = await fetch(`/api/vms/${name}`, { method: "DELETE" });
+            const res = await fetch(`/api/vms/${id}`, { method: "DELETE" });
             if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "failed"); }
-            toast(`💀 ${name} deleted`);
+            toast(`💀 ${label} deleted`);
           });
           setSelected(null);
         } catch (e) { toast(e.message, "err"); }
       }, [toast]);
 
-      const onClone = useCallback(async (sourceName, ev) => {
-        const targetName = prompt(`Clone "${sourceName}" — name for the new VM:`);
-        if (!targetName) return;
+      const onClone = useCallback(async (sourceId, sourceLabel, ev) => {
+        const targetLabel = prompt(`Clone "${sourceLabel}" — label for the new VM:`, `${sourceLabel} copy`);
+        if (!targetLabel) return;
         try {
           await withButton(ev, async () => {
-            const res = await fetch(`/api/vms/${sourceName}/clone`, {
+            const res = await fetch(`/api/vms/${sourceId}/clone`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ name: targetName.trim() }),
+              body: JSON.stringify({ label: targetLabel.trim() }),
             });
-            if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "clone failed"); }
-            toast(`🍞 ${sourceName} → ${targetName}`);
-            setSelected(targetName.trim());
+            const d = await res.json();
+            if (!res.ok) throw new Error(d.error || "clone failed");
+            toast(`🍞 ${sourceLabel} → ${d.label}`);
+            setSelected(d.id);
           });
         } catch (e) { toast(e.message, "err"); }
       }, [toast]);
 
-      const onSnap = useCallback(async (name, ev) => {
+      const onSnap = useCallback(async (id, _label, ev) => {
         try {
           await withButton(ev, async () => {
-            const res = await fetch(`/api/vms/${name}/snapshots`, { method: "POST" });
+            const res = await fetch(`/api/vms/${id}/snapshots`, { method: "POST" });
             const d = await res.json();
             if (!res.ok) throw new Error(d.error || "snapshot failed");
             toast(`📸 snapshot saved — ${d.name}`);
@@ -1829,40 +1876,56 @@ packages:
         } catch (e) { toast(e.message, "err"); }
       }, [toast]);
 
-      const onSetAutostart = useCallback(async (name, value) => {
+      const onSetAutostart = useCallback(async (id, label, value) => {
         try {
-          const res = await fetch(`/api/vms/${name}/autostart`, {
+          const res = await fetch(`/api/vms/${id}/autostart`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ value }),
           });
           if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "failed"); }
-          toast(value ? `⚡ ${name} — autostart on` : `${name} — autostart off`);
+          toast(value ? `⚡ ${label} — autostart on` : `${label} — autostart off`);
         } catch (e) { toast(e.message, "err"); }
       }, [toast]);
 
-      const onUpdateConfig = useCallback(async (name, patch) => {
-        const res = await fetch(`/api/vms/${name}/config`, {
+      const onUpdateConfig = useCallback(async (id, label, patch) => {
+        const res = await fetch(`/api/vms/${id}/config`, {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify(patch),
         });
         const data = await res.json();
         if (!res.ok) { toast(data.error || "save failed", "err"); throw new Error(data.error || "save failed"); }
-        toast(`💾 ${name} saved`);
+        toast(`💾 ${label} saved`);
       }, [toast]);
 
       // Tag updates fire on every chip add/remove — silent on success
       // (the WS push delivers the new chip list within ms) and toasts only
       // on failure so the user doesn't see "saved" 5x in a row.
-      const onUpdateTags = useCallback(async (name, tags) => {
+      const onUpdateTags = useCallback(async (id, tags) => {
         try {
-          const res = await fetch(`/api/vms/${name}/config`, {
+          const res = await fetch(`/api/vms/${id}/config`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ tags }),
           });
           if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "failed"); }
+        } catch (e) { toast(e.message, "err"); }
+      }, [toast]);
+
+      // Label rename — wraps onUpdateConfig but uses the OLD label in the
+      // toast (the new label is in the patch, but the user wants
+      // confirmation that the rename took, not just "saved").
+      const onRename = useCallback(async (id, oldLabel, newLabel) => {
+        if (!newLabel || newLabel === oldLabel) return;
+        try {
+          const res = await fetch(`/api/vms/${id}/config`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ label: newLabel }),
+          });
+          if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "rename failed"); }
+          toast(`✏ ${oldLabel} → ${newLabel}`);
         } catch (e) { toast(e.message, "err"); }
       }, [toast]);
 
@@ -1896,18 +1959,20 @@ packages:
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Failed.");
-        toast(`🥖 ${body.name} is rising`);
-        setSelected(body.name);
+        toast(`🥖 ${data.label} is rising`);
+        setSelected(data.id);
       }, [toast]);
 
       // ── derived ──
       const vm = useMemo(
-        () => (selected && selected !== "create" ? vms.find(v => v.name === selected) ?? null : null),
+        () => (selected && selected !== "create" && selected !== "images"
+          ? vms.find(v => v.id === selected) ?? null
+          : null),
         [vms, selected],
       );
       const running = vms.filter(v => v.state === "running").length;
       const subtitle = vm
-        ? vm.name
+        ? vm.label
         : selected === "create"
           ? "New VM"
           : selected === "images"
@@ -1915,7 +1980,7 @@ packages:
             : "cloud hypervisor";
 
       const mobile = isMobile();
-      const handlers = { onAct, onStart, onClone, onDelete, onSnap, onSetAutostart, onUpdateConfig, onUpdateTags };
+      const handlers = { onAct, onStart, onClone, onDelete, onSnap, onSetAutostart, onUpdateConfig, onUpdateTags, onRename };
 
       return html`
         <${Header}

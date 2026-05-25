@@ -61,7 +61,7 @@ export function createDiscoverer(deps: DiscovererDeps): VMDiscoverer {
     }
   };
 
-  const inferConfig = (vmName: string, files: string[]): VMConfig => {
+  const inferConfig = (vmId: string, files: string[]): VMConfig => {
     const set = new Set(files);
 
     const kernelFile = KERNEL_NAMES.find(n => set.has(n))
@@ -71,8 +71,7 @@ export function createDiscoverer(deps: DiscovererDeps): VMDiscoverer {
     const hasInitrd = set.has("initrd.img") || set.has("initrd") || set.has("initramfs.img");
 
     // Default to UEFI when we can't tell — that's how toBootConfig
-    // resolves the firmware fallback at spawn time anyway, so the UI
-    // shouldn't claim "unknown" while the system silently picks UEFI.
+    // resolves the firmware fallback at spawn time anyway.
     let bootMode: BootMode = "uefi";
     if (kernelFile && hasInitrd) bootMode = "direct";
     else if (hasFirmware) bootMode = "uefi";
@@ -81,12 +80,14 @@ export function createDiscoverer(deps: DiscovererDeps): VMDiscoverer {
       f.endsWith(".qcow2") || f.endsWith(".raw") || (f.endsWith(".img") && !f.startsWith("initr")),
     );
 
-    return { name: vmName, bootMode, kernelPath: kernelFile, disks };
+    // No persisted config — use the directory name as both id and label
+    // so the user still sees something meaningful in the sidebar.
+    return { id: vmId, label: vmId, bootMode, kernelPath: kernelFile, disks };
   };
 
-  const enrichFromRunner = async (vmName: string, instance: VMInstance): Promise<void> => {
+  const enrichFromRunner = async (vmId: string, instance: VMInstance): Promise<void> => {
     try {
-      const info = await runner.info(vmName) as ChVmInfo;
+      const info = await runner.info(vmId) as ChVmInfo;
       const cfg = info?.config;
       if (cfg?.cpus?.boot_vcpus) instance.config.cpus = cfg.cpus.boot_vcpus;
       if (cfg?.memory?.size) instance.config.memoryMb = cfg.memory.size / (1024 * 1024);
@@ -95,23 +96,29 @@ export function createDiscoverer(deps: DiscovererDeps): VMDiscoverer {
     }
   };
 
-  const discoverOne = async (name: string): Promise<VMInstance> => {
-    const dir = path.join(vmDir, name);
+  const discoverOne = async (id: string): Promise<VMInstance> => {
+    const dir = path.join(vmDir, id);
     const sockPath = path.join(dir, "vmm.sock");
     const files = await listEntries(dir);
 
     const hasSock = await stat(sockPath).then(s => s.isSocket()).catch(() => false);
-    const persisted = await configStore.read(name);
-    const vmConfig = persisted ?? inferConfig(name, files);
-    const mac = net.macFor(name);
+    const persisted = await configStore.read(id);
+    const vmConfig = persisted ?? inferConfig(id, files);
+    const mac = net.macFor(id);
 
-    const instance: VMInstance = { name, state: "stopped", mac, config: vmConfig };
+    const instance: VMInstance = {
+      id,
+      label: vmConfig.label,
+      state: "stopped",
+      mac,
+      config: vmConfig,
+    };
 
     if (hasSock) {
-      const alive = await runner.ping(name).catch(() => false);
+      const alive = await runner.ping(id).catch(() => false);
       instance.state = alive ? "running" : "error";
       if (alive) {
-        await enrichFromRunner(name, instance);
+        await enrichFromRunner(id, instance);
         instance.ip = await net.macToIp(mac);
       }
     }
@@ -121,9 +128,11 @@ export function createDiscoverer(deps: DiscovererDeps): VMDiscoverer {
 
   return {
     async discover() {
-      const vmNames = await listEntries(vmDir);
-      const instances = await Promise.all(vmNames.map(discoverOne));
-      return instances.sort((a, b) => a.name.localeCompare(b.name));
+      const ids = await listEntries(vmDir);
+      const instances = await Promise.all(ids.map(discoverOne));
+      // Sort by label so the sidebar reads naturally to humans even though
+      // directory ids are time-encoded ULIDs.
+      return instances.sort((a, b) => a.label.localeCompare(b.label));
     },
   };
 }

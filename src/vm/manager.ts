@@ -24,7 +24,8 @@ export interface VMManagerOptions {
  * Bun's persistent {@link VMConfig} and the wire-shaped {@link BootConfig}.
  *
  * Knows nothing about Cloud Hypervisor, sudo, TAPs, or pool slots — that
- * is the runner's job.
+ * is the runner's job. All public methods take the stable VM `id`; the
+ * mutable user-facing `label` lives only on the config / instance.
  */
 export class VMManager {
   private readonly instances = new Map<string, VMInstance>();
@@ -40,7 +41,7 @@ export class VMManager {
     this.vmDir = opts.vmDir;
     this.firmwareDir = opts.firmwareDir;
     for (const vm of opts.seed ?? []) {
-      this.instances.set(vm.name, vm);
+      this.instances.set(vm.id, vm);
     }
   }
 
@@ -54,31 +55,31 @@ export class VMManager {
     return [...this.instances.values()];
   }
 
-  /** Returns a tracked VM by name, or `undefined` if not found. */
-  getVM(name: string): VMInstance | undefined {
-    return this.instances.get(name);
+  /** Returns a tracked VM by id, or `undefined` if not found. */
+  getVM(id: string): VMInstance | undefined {
+    return this.instances.get(id);
   }
 
   /**
    * Tracks a new instance without starting it. Used after a VM is created
    * out-of-band (e.g. cloned from another VM's disk).
-   * @throws If a VM with this name is already tracked.
+   * @throws If a VM with this id is already tracked.
    */
   register(instance: VMInstance): void {
-    if (this.instances.has(instance.name)) {
-      throw new Error(`VM '${instance.name}' is already tracked`);
+    if (this.instances.has(instance.id)) {
+      throw new Error(`VM '${instance.id}' is already tracked`);
     }
-    this.instances.set(instance.name, instance);
+    this.instances.set(instance.id, instance);
   }
 
   /**
    * Boots a VM via the runner. Resolves config paths to absolutes first.
-   * @throws If a VM with this name is already in the `running` state.
+   * @throws If a VM with this id is already in the `running` state.
    */
   async startVM(vmConfig: VMConfig): Promise<VMInstance> {
-    const { name } = vmConfig;
-    if (this.instances.get(name)?.state === "running") {
-      throw new Error(`VM '${name}' is already running`);
+    const { id, label } = vmConfig;
+    if (this.instances.get(id)?.state === "running") {
+      throw new Error(`VM '${id}' is already running`);
     }
 
     const bootConfig = this.toBootConfig(vmConfig);
@@ -87,7 +88,8 @@ export class VMManager {
     });
 
     const instance: VMInstance = {
-      name,
+      id,
+      label,
       state: runtime.state,
       pid: runtime.pid,
       tapInterface: runtime.tap,
@@ -95,52 +97,52 @@ export class VMManager {
       startedAt: new Date(runtime.startedAt),
       config: vmConfig,
     };
-    this.instances.set(name, instance);
+    this.instances.set(id, instance);
     return instance;
   }
 
   /** Graceful shutdown via the runner (which falls back to SIGTERM internally). */
-  async stopVM(name: string): Promise<void> {
-    const vm = this.instances.get(name);
-    if (!vm) throw new Error(`VM '${name}' not found`);
-    this.setState(name, "stopping");
-    await this.runner.stop(name);
+  async stopVM(id: string): Promise<void> {
+    const vm = this.instances.get(id);
+    if (!vm) throw new Error(`VM '${id}' not found`);
+    this.setState(id, "stopping");
+    await this.runner.stop(id);
   }
 
   /**
    * Removes a VM's directory and untracks it.
    * @throws If the VM is in any non-terminal state.
    */
-  async deleteVM(name: string): Promise<void> {
-    const vm = this.instances.get(name);
+  async deleteVM(id: string): Promise<void> {
+    const vm = this.instances.get(id);
     if (vm && (vm.state === "running" || vm.state === "booting" || vm.state === "stopping")) {
-      throw new Error(`VM '${name}' is ${vm.state}; shut it down first`);
+      throw new Error(`VM '${id}' is ${vm.state}; shut it down first`);
     }
-    await rm(path.join(this.vmDir, name), { recursive: true, force: true });
-    this.instances.delete(name);
+    await rm(path.join(this.vmDir, id), { recursive: true, force: true });
+    this.instances.delete(id);
   }
 
   /* ─── pass-throughs to the runner ─────────────────────────────────── */
 
-  reboot(name: string): Promise<void> { return this.runner.reboot(name); }
-  pause(name: string): Promise<void> { return this.runner.pause(name); }
-  resume(name: string): Promise<void> { return this.runner.resume(name); }
+  reboot(id: string): Promise<void> { return this.runner.reboot(id); }
+  pause(id: string): Promise<void> { return this.runner.pause(id); }
+  resume(id: string): Promise<void> { return this.runner.resume(id); }
   /** Try graceful shutdown; runner falls back to a SIGTERM internally. */
-  shutdown(name: string): Promise<void> { return this.runner.stop(name); }
-  snapshot(name: string, destPath: string): Promise<void> { return this.runner.snapshot(name, destPath); }
-  counters(name: string): Promise<unknown> { return this.runner.counters(name); }
-  info(name: string): Promise<unknown> { return this.runner.info(name); }
-  ping(name: string): Promise<boolean> { return this.runner.ping(name); }
+  shutdown(id: string): Promise<void> { return this.runner.stop(id); }
+  snapshot(id: string, destPath: string): Promise<void> { return this.runner.snapshot(id, destPath); }
+  counters(id: string): Promise<unknown> { return this.runner.counters(id); }
+  info(id: string): Promise<unknown> { return this.runner.info(id); }
+  ping(id: string): Promise<boolean> { return this.runner.ping(id); }
 
   /* ─── internal ────────────────────────────────────────────────────── */
 
-  private setState(name: string, state: VMState): void {
-    const vm = this.instances.get(name);
+  private setState(id: string, state: VMState): void {
+    const vm = this.instances.get(id);
     if (vm) vm.state = state;
   }
 
-  private handleExit(name: string, exitCode: number): void {
-    const vm = this.instances.get(name);
+  private handleExit(id: string, exitCode: number): void {
+    const vm = this.instances.get(id);
     if (!vm) return;
     vm.state = exitCode === 0 ? "stopped" : "error";
     vm.pid = undefined;
@@ -152,9 +154,13 @@ export class VMManager {
    * fields) into a wire-shaped {@link BootConfig} the runner can boot
    * directly. Resolves the firmware fallback against the configured
    * `firmwareDir`.
+   *
+   * Wire note: {@link BootConfig.name} is populated from `cfg.id`. From
+   * croutond's perspective it's just an opaque slot key, so we don't need
+   * a coordinated Rust change to rename the field.
    */
   private toBootConfig(cfg: VMConfig): BootConfig {
-    const vmPath = path.join(this.vmDir, cfg.name);
+    const vmPath = path.join(this.vmDir, cfg.id);
     const mode = cfg.bootMode;
     const disks = cfg.disks.map(d => path.join(vmPath, d));
 
@@ -173,7 +179,7 @@ export class VMManager {
     }
 
     return {
-      name: cfg.name,
+      name: cfg.id,
       cpus: cfg.cpus ?? 2,
       memoryMb: cfg.memoryMb ?? 2048,
       bootMode: mode,

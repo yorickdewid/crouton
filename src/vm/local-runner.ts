@@ -32,12 +32,15 @@ interface LiveVM {
  * Builds the local {@link VMRunner}. Owns CH process spawning, TAP/bridge
  * setup, and socket cleanup — i.e. all the privileged / OS-touching work
  * that will eventually move to `croutond`.
+ *
+ * The runner keys every operation by the VM id passed through
+ * {@link BootConfig.name}; it never sees the user-facing label.
  */
 export function createLocalRunner(deps: LocalRunnerDeps): VMRunner {
   const { chApi, net, vmDir: rootDir, chBinary } = deps;
   const live = new Map<string, LiveVM>();
 
-  const sockPathOf = (name: string): string => path.join(rootDir, name, "vmm.sock");
+  const sockPathOf = (id: string): string => path.join(rootDir, id, "vmm.sock");
 
   const buildChArgs = (cfg: BootConfig, tap: string, mac: string): string[] => {
     const args = [`--api-socket=${sockPathOf(cfg.name)}`];
@@ -70,16 +73,17 @@ export function createLocalRunner(deps: LocalRunnerDeps): VMRunner {
 
   return {
     async start(config, events) {
-      if (live.has(config.name)) {
-        throw new Error(`VM '${config.name}' is already running`);
+      const id = config.name;
+      if (live.has(id)) {
+        throw new Error(`VM '${id}' is already running`);
       }
 
-      const mac = net.macFor(config.name);
+      const mac = net.macFor(id);
       await net.ensureBridge();
       const tap = await net.allocateTap();
       await net.setupTap(tap);
 
-      const sp = sockPathOf(config.name);
+      const sp = sockPathOf(id);
       const args = buildChArgs(config, tap, mac);
 
       const proc = Bun.spawn([chBinary, ...args], {
@@ -88,16 +92,16 @@ export function createLocalRunner(deps: LocalRunnerDeps): VMRunner {
         onExit: async (_proc, exitCode) => {
           await net.teardownTap(tap).catch(() => { /* best-effort */ });
           try { await unlink(sp); } catch { /* socket may already be gone */ }
-          live.delete(config.name);
-          events?.onExit?.(config.name, exitCode ?? -1);
+          live.delete(id);
+          events?.onExit?.(id, exitCode ?? -1);
         },
       });
 
       const startedAt = new Date().toISOString();
-      live.set(config.name, { pid: proc.pid, tap, mac, startedAt, sockPath: sp });
+      live.set(id, { pid: proc.pid, tap, mac, startedAt, sockPath: sp });
 
       return {
-        name: config.name,
+        name: id,
         mac,
         tap,
         pid: proc.pid,
@@ -106,10 +110,10 @@ export function createLocalRunner(deps: LocalRunnerDeps): VMRunner {
       };
     },
 
-    async stop(name) {
-      const vm = live.get(name);
+    async stop(id) {
+      const vm = live.get(id);
       try {
-        await chApi.vmShutdown(name);
+        await chApi.vmShutdown(id);
       } catch {
         // CH API unreachable — fall back to SIGTERM. onExit will still fire
         // through Bun.spawn and clean up TAP + socket.
@@ -117,18 +121,18 @@ export function createLocalRunner(deps: LocalRunnerDeps): VMRunner {
       }
     },
 
-    reboot: (name) => chApi.vmReboot(name),
-    pause: (name) => chApi.vmPause(name),
-    resume: (name) => chApi.vmResume(name),
-    snapshot: (name, dest) => chApi.vmSnapshot(name, dest),
-    counters: (name) => chApi.vmCounters(name),
-    info: (name) => chApi.vmInfo(name),
-    ping: (name) => chApi.vmmPing(name),
+    reboot: (id) => chApi.vmReboot(id),
+    pause: (id) => chApi.vmPause(id),
+    resume: (id) => chApi.vmResume(id),
+    snapshot: (id, dest) => chApi.vmSnapshot(id, dest),
+    counters: (id) => chApi.vmCounters(id),
+    info: (id) => chApi.vmInfo(id),
+    ping: (id) => chApi.vmmPing(id),
 
     async listRunning() {
       const out: VMRuntime[] = [];
-      for (const [name, vm] of live) {
-        out.push({ name, mac: vm.mac, tap: vm.tap, pid: vm.pid, state: "running", startedAt: vm.startedAt });
+      for (const [id, vm] of live) {
+        out.push({ name: id, mac: vm.mac, tap: vm.tap, pid: vm.pid, state: "running", startedAt: vm.startedAt });
       }
       return out;
     },

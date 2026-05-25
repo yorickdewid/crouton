@@ -26,7 +26,7 @@ const runner = createLocalRunner({ chApi, net, vmDir: config.vmDir, chBinary: co
 const discoverer = createDiscoverer({ vmDir: config.vmDir, configStore, runner, net });
 
 const seed = await discoverer.discover();
-console.log(`discovered ${seed.length} VM(s): ${seed.map(v => `${v.name}(${v.state})`).join(", ")}`);
+console.log(`discovered ${seed.length} VM(s): ${seed.map(v => `${v.label}(${v.state})`).join(", ")}`);
 
 const vmManager = new VMManager({
   seed,
@@ -44,12 +44,12 @@ const handleApi = createApiRouter({
 // Discovery already determined which ones are stopped vs already running.
 const autostartTargets = seed.filter(vm => vm.state === "stopped" && vm.config.autostart);
 if (autostartTargets.length > 0) {
-  console.log(`autostarting ${autostartTargets.length} VM(s): ${autostartTargets.map(v => v.name).join(", ")}`);
+  console.log(`autostarting ${autostartTargets.length} VM(s): ${autostartTargets.map(v => v.label).join(", ")}`);
   for (const vm of autostartTargets) {
     try {
       await vmManager.startVM(vm.config);
     } catch (e) {
-      console.error(`failed to autostart ${vm.name}:`, (e as Error).message);
+      console.error(`failed to autostart ${vm.label}:`, (e as Error).message);
     }
   }
 }

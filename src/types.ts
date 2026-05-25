@@ -6,8 +6,19 @@ export type BootMode = "direct" | "uefi";
 
 /** Static configuration used to define and launch a VM. */
 export interface VMConfig {
-  /** Human-readable VM identifier. */
-  name: string;
+  /**
+   * Stable identifier. Equal to the on-disk directory name under `vmDir`.
+   * Generated as a ULID when the VM is provisioned; never changes. Used
+   * everywhere internally — MAC derivation, socket paths, API params,
+   * WS payload keys, croutond's slot key on the wire.
+   */
+  id: string;
+  /**
+   * User-facing display name. Mutable, free-form, not required to be
+   * unique across the fleet. Renaming a VM updates this field only —
+   * the directory, MAC, IP, and croutond slot are unaffected.
+   */
+  label: string;
   /** Number of virtual CPUs to allocate. */
   cpus?: number;
   /** RAM allocation in megabytes. */
@@ -22,16 +33,17 @@ export interface VMConfig {
   autostart?: boolean;
   /**
    * Free-form labels for filtering and grouping. Normalised on persist:
-   * lowercased, trimmed, deduplicated, sorted. See {@link TagSchema} for the
-   * accepted alphabet.
+   * lowercased, trimmed, deduplicated, sorted.
    */
   tags?: string[];
 }
 
 /** Runtime metadata for a VM currently known by the manager. */
 export interface VMInstance {
-  /** VM identifier. */
-  name: string;
+  /** Stable identifier (matches {@link VMConfig.id}). */
+  id: string;
+  /** User-facing display name (matches {@link VMConfig.label}). */
+  label: string;
   /** Current lifecycle state. */
   state: VMState;
   /** Process ID of the active VM process, when running. */

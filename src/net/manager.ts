@@ -14,8 +14,12 @@ export interface NetworkManager {
   setupTap(tap: string): Promise<void>;
   /** Brings a TAP down and removes it. Best-effort; errors are swallowed. */
   teardownTap(tap: string): Promise<void>;
-  /** Deterministic locally-administered MAC for a VM name. */
-  macFor(vmName: string): string;
+  /**
+   * Deterministic locally-administered MAC for a VM. Derived from the
+   * stable id so the MAC survives label rename and never changes for the
+   * lifetime of the VM directory.
+   */
+  macFor(vmId: string): string;
   /** Resolves a MAC to an IP via `/proc/net/arp`, or `undefined` if unknown. */
   macToIp(mac: string): Promise<string | undefined>;
 }
@@ -63,9 +67,9 @@ export function createNetwork(
       }
     },
 
-    macFor(vmName) {
+    macFor(vmId) {
       const hasher = new Bun.CryptoHasher("sha256");
-      hasher.update(vmName);
+      hasher.update(vmId);
       const hex = hasher.digest("hex");
       return `02:${hex.slice(0, 2)}:${hex.slice(2, 4)}:${hex.slice(4, 6)}:${hex.slice(6, 8)}:${hex.slice(8, 10)}`;
     },

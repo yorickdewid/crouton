@@ -886,11 +886,14 @@
     // ── components ───────────────────────────────────────────────────────
 
     /**
-     * Renders a Lucide icon node ([tag, attrs, children]) as inline SVG.
+     * Renders a Lucide icon as inline SVG. Lucide's named ESM exports
+     * (Camera, Zap, …) are the *array of child SVG elements* (each shaped
+     * `[tag, attrs]`), NOT an `[tag, attrs, children]` IconNode — the
+     * `<svg>` wrapper attributes come from us.
      */
     function Icon({ icon, size = 14, strokeWidth = 2, class: cls = "" }) {
       if (!icon) return null;
-      const children = icon[2] || [];
+      const children = Array.isArray(icon) ? icon : [];
       return html`
         <svg
           xmlns="http://www.w3.org/2000/svg"

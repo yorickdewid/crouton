@@ -18,6 +18,29 @@ const VMNameSchema = z
   .regex(/^[a-z0-9][a-z0-9_-]*$/i, "must start alphanumeric and contain only letters, digits, '-' or '_'");
 
 /**
+ * Single-tag alphabet: lowercase alphanumeric leading, plus `_`, `-`, `:`,
+ * up to 32 chars. The colon is allowed so users can encode `k:v`-style
+ * scopes (`env:prod`, `team:platform`) without us imposing a structure.
+ */
+export const TagSchema = z
+  .string()
+  .trim()
+  .toLowerCase()
+  .min(1)
+  .max(32)
+  .regex(/^[a-z0-9][a-z0-9_:-]*$/, "must start alphanumeric and contain only letters, digits, '-', '_' or ':'");
+
+/**
+ * Array of tags. Bounded at 12 per VM, normalised on parse: deduplicated
+ * (case-folded) and sorted. The output is canonical — callers can rely on
+ * it being JSON-stable.
+ */
+export const TagsSchema = z
+  .array(TagSchema)
+  .max(12, "no more than 12 tags per VM")
+  .transform((arr) => Array.from(new Set(arr)).sort());
+
+/**
  * Zod schema for {@link CreateVMOptions}. Authoritative source of both the
  * runtime validation and the inferred TypeScript type.
  */
@@ -43,6 +66,8 @@ export const CreateVMOptionsSchema = z.object({
    * Empty / omitted skips cloud-init entirely.
    */
   cloudInit: z.string().max(16384).optional(),
+  /** Initial tags for the VM. Optional, defaults to empty. */
+  tags: TagsSchema.optional(),
 });
 
 /**
@@ -83,6 +108,7 @@ export const VMConfigPatchSchema = z.object({
   bootMode: z.enum(["direct", "uefi"]).optional(),
   kernelPath: z.string().max(255).optional(),
   autostart: z.boolean().optional(),
+  tags: TagsSchema.optional(),
 });
 
 /**
@@ -135,7 +161,7 @@ export function createProvisioner(deps: ProvisionerDeps): VMProvisioner {
 
   return {
     async provision(opts) {
-      const { name, image, diskSizeGb, cpus, memoryMb, cloudInit } = opts;
+      const { name, image, diskSizeGb, cpus, memoryMb, cloudInit, tags } = opts;
 
       const vmDir = path.join(rootDir, name);
       const diskPath = path.join(vmDir, "disk0.qcow2");
@@ -166,6 +192,7 @@ export function createProvisioner(deps: ProvisionerDeps): VMProvisioner {
           memoryMb,
           bootMode: "uefi",
           disks,
+          tags: tags ?? [],
         };
 
         await configStore.write(vmConfig);

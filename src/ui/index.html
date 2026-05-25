@@ -683,6 +683,92 @@
       font-size: 12px;
     }
 
+    /* tags — small hairline chips, all neutral. Active state used by the filter strip. */
+    .tag-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      color: var(--dim);
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 3px;
+      letter-spacing: 0.01em;
+      line-height: 1.4;
+      white-space: nowrap;
+      user-select: none;
+    }
+    .tag-chip.clickable { cursor: pointer; transition: border-color 0.12s, color 0.12s, background 0.12s; }
+    .tag-chip.clickable:hover { border-color: var(--dim); color: var(--text); }
+    .tag-chip.active {
+      background: var(--accent-soft);
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .tag-chip .tag-x {
+      display: inline-flex;
+      cursor: pointer;
+      color: var(--muted);
+      border-radius: 2px;
+      padding: 0 1px;
+      margin-left: 2px;
+    }
+    .tag-chip .tag-x:hover { color: var(--danger); }
+    .tag-chip.overflow { color: var(--muted); font-variant-numeric: tabular-nums; }
+
+    .tag-strip { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+
+    /* tag editor: chip row + inline input that looks like a chip */
+    .tag-editor {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 4px;
+      padding: 4px 6px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      min-height: 30px;
+      transition: border-color 0.12s, box-shadow 0.12s;
+    }
+    .tag-editor.focused { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+    .tag-editor input {
+      flex: 1;
+      min-width: 80px;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 12px;
+      padding: 2px 4px;
+    }
+    .tag-editor input::placeholder { color: var(--muted); }
+
+    /* filter strip — sits above the list-top inside the sidebar */
+    .filter-strip {
+      padding: 6px 12px 8px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 4px;
+      background: var(--bg);
+    }
+    .filter-strip-icon { color: var(--muted); display: inline-flex; align-items: center; margin-right: 2px; }
+    .filter-clear {
+      background: none;
+      border: none;
+      color: var(--muted);
+      font-family: var(--font);
+      font-size: 11px;
+      cursor: pointer;
+      padding: 1px 4px;
+      margin-left: auto;
+    }
+    .filter-clear:hover { color: var(--text); }
+
     /* mobile */
     @media (max-width: 700px) {
       /* Let the page scroll naturally; nested scroll on flex children
@@ -720,7 +806,7 @@
     import {
       Camera, Package, Zap, Moon, Sun, ArrowLeft, ArrowDown, ArrowUp,
       ChevronDown, ChevronUp, Play, Pause, RotateCcw, Power, Copy,
-      Trash2, AlertTriangle, Plus
+      Trash2, AlertTriangle, Plus, X, Tag, Filter
     } from "https://esm.sh/lucide@0.475.0";
 
     // ── constants ────────────────────────────────────────────────────────
@@ -835,6 +921,64 @@
         <button class=${"toggle" + (value ? " on" : "")} disabled=${disabled} onClick=${() => onChange(!value)} aria-pressed=${value}>
           <span class="knob"></span>
         </button>
+      `;
+    }
+
+    const TAG_RE = /^[a-z0-9][a-z0-9_:-]*$/;
+    const TAG_MAX_LEN = 32;
+    const TAGS_MAX = 12;
+
+    /**
+     * Chip-style multi-input for the {@link VMConfig.tags} field. `value` is
+     * the canonical (sorted) array; every commit/remove calls `onChange` with
+     * a fresh sorted array. Validation mirrors `TagSchema` in `src/vm/create.ts`.
+     */
+    function TagEditor({ value, onChange, disabled, placeholder = "add tag…" }) {
+      const [input, setInput] = useState("");
+      const [focused, setFocused] = useState(false);
+      const tags = value ?? [];
+
+      const commit = (raw) => {
+        const t = String(raw).trim().toLowerCase();
+        if (!t) return;
+        if (t.length > TAG_MAX_LEN || !TAG_RE.test(t)) return;
+        if (tags.includes(t)) { setInput(""); return; }
+        if (tags.length >= TAGS_MAX) return;
+        onChange?.([...tags, t].sort());
+        setInput("");
+      };
+
+      const remove = (t) => onChange?.(tags.filter(x => x !== t));
+
+      const onKeyDown = (e) => {
+        if (e.key === "Enter") { e.preventDefault(); commit(input); }
+        else if (e.key === "Backspace" && input === "" && tags.length > 0) {
+          e.preventDefault();
+          remove(tags[tags.length - 1]);
+        }
+      };
+
+      return html`
+        <div class=${"tag-editor" + (focused ? " focused" : "")}>
+          ${tags.map(t => html`
+            <span class="tag-chip" key=${t}>
+              ${t}
+              ${disabled ? null : html`<span class="tag-x" role="button" aria-label="remove tag" onClick=${() => remove(t)}><${Icon} icon=${X} size=${10} strokeWidth=${2.5} /></span>`}
+            </span>
+          `)}
+          ${disabled ? null : html`
+            <input
+              type="text"
+              value=${input}
+              placeholder=${tags.length === 0 ? placeholder : ""}
+              onInput=${e => setInput(e.target.value.toLowerCase())}
+              onKeyDown=${onKeyDown}
+              onFocus=${() => setFocused(true)}
+              onBlur=${() => setFocused(false)}
+              spellcheck=${false}
+              autocomplete="off" />
+          `}
+        </div>
       `;
     }
 
@@ -954,6 +1098,9 @@
       const cls = ["vm-row"];
       if (active) cls.push("active");
       if (vm.state === "running") cls.push("running");
+      const tags = vm.config.tags ?? [];
+      const visibleTags = tags.slice(0, 3);
+      const overflow = tags.length - visibleTags.length;
       return html`
         <div class=${cls.join(" ")} onClick=${onClick}>
           <div class="vm-row-left">
@@ -962,24 +1109,50 @@
               ${vm.config.autostart ? html`<span class="auto-mark" title="autostarts on boot"><${Icon} icon=${Zap} size=${11} strokeWidth=${2.5} /></span>` : null}
             </div>
             <div class="vm-row-sub">${sub}</div>
+            ${tags.length > 0 ? html`
+              <div class="tag-strip">
+                ${visibleTags.map(t => html`<span class="tag-chip" key=${t}>${t}</span>`)}
+                ${overflow > 0 ? html`<span class="tag-chip overflow" title=${tags.slice(3).join(", ")}>+${overflow}</span>` : null}
+              </div>
+            ` : null}
           </div>
           <${StateBadge} state=${vm.state} />
         </div>
       `;
     }
 
-    function VMList({ vms, selected, onSelect, onNew, onOpenImages, hidden }) {
+    function VMList({ vms, selected, onSelect, onNew, onOpenImages, hidden, allTags, activeTags, onToggleTag, onClearTags }) {
+      const filtered = activeTags.length === 0
+        ? vms
+        : vms.filter(vm => activeTags.every(t => (vm.config.tags ?? []).includes(t)));
       return html`
         <div class=${"vm-list" + (hidden ? " hidden" : "")}>
+          ${allTags.length > 0 ? html`
+            <div class="filter-strip">
+              <span class="filter-strip-icon" title="filter by tags"><${Icon} icon=${Filter} size=${12} /></span>
+              ${allTags.map(t => html`
+                <span
+                  class=${"tag-chip clickable" + (activeTags.includes(t) ? " active" : "")}
+                  key=${t}
+                  onClick=${() => onToggleTag(t)}>${t}</span>
+              `)}
+              ${activeTags.length > 0 ? html`<button class="filter-clear" onClick=${onClearTags}>clear</button>` : null}
+            </div>
+          ` : null}
           <div class="list-top">
-            <span>VMs</span>
+            <span>VMs${activeTags.length ? html` <span style="color:var(--dim);text-transform:none;letter-spacing:0;font-size:11px">· ${filtered.length}/${vms.length}</span>` : ""}</span>
             <div style="display:flex;gap:8px">
               <button class="new-btn" onClick=${onOpenImages}><${Icon} icon=${Package} size=${12} /> images</button>
               <button class="new-btn" onClick=${onNew}><${Icon} icon=${Plus} size=${12} /> new</button>
             </div>
           </div>
           <div class="vm-rows">
-            ${vms.map(vm => html`
+            ${filtered.length === 0 && activeTags.length > 0 ? html`
+              <div style="padding:24px 16px;color:var(--muted);font-size:12px;text-align:center">
+                no VMs match <span style="color:var(--dim)">${activeTags.join(", ")}</span>
+                <div style="margin-top:8px"><button class="new-btn" onClick=${onClearTags}>clear filter</button></div>
+              </div>
+            ` : filtered.map(vm => html`
               <${VMRow}
                 key=${vm.name}
                 vm=${vm}
@@ -1084,6 +1257,18 @@
             <span>VM is running. CPU / memory / boot changes apply on next start.</span>
           </div>
         ` : null}
+
+        <div class="setting-row" style="align-items:flex-start;padding-top:14px;padding-bottom:14px">
+          <div class="setting-text">
+            <span class="setting-label">Tags</span>
+            <span class="setting-hint">Free-form labels for filtering. Saved as you type.</span>
+          </div>
+          <div style="flex:1;max-width:360px">
+            <${TagEditor}
+              value=${cfg.tags ?? []}
+              onChange=${tags => handlers.onUpdateTags(vm.name, tags)} />
+          </div>
+        </div>
 
         <div class="setting-row">
           <div class="setting-text">
@@ -1282,6 +1467,7 @@ packages:
       const [disk, setDisk] = useState(25);
       const [cloudInit, setCloudInit] = useState(DEFAULT_CLOUD_INIT);
       const [showCloudInit, setShowCloudInit] = useState(false);
+      const [tags, setTags] = useState([]);
       const [error, setError] = useState("");
       const [busy, setBusy] = useState(false);
 
@@ -1301,6 +1487,7 @@ packages:
             diskSizeGb: disk,
           };
           if (cloudInit.trim()) body.cloudInit = cloudInit;
+          if (tags.length) body.tags = tags;
           await onSubmit(body);
         } catch (e) {
           setError(e.message);
@@ -1348,6 +1535,11 @@ packages:
           <div class="field">
             <label>Disk size (GB)</label>
             <input type="number" min="1" value=${disk} onInput=${e => setDisk(+e.target.value)} />
+          </div>
+
+          <div class="field">
+            <label>Tags <span style="color:var(--muted);font-weight:400;text-transform:none;letter-spacing:0">— optional, comma- or enter-separated</span></label>
+            <${TagEditor} value=${tags} onChange=${setTags} />
           </div>
 
           <div class="field">
@@ -1485,8 +1677,36 @@ packages:
       const [selected, setSelected] = useState(null);
       const [theme, setTheme] = useState(localStorage.getItem("theme") || "dark");
       const [toasts, setToasts] = useState([]);
+      const [activeTags, setActiveTags] = useState(() => {
+        try { return JSON.parse(localStorage.getItem("activeTags") || "[]"); }
+        catch { return []; }
+      });
       const [, setTick] = useState(0); // forces a re-render when counters arrive
       const history = useRef(new Map());
+
+      // Persist the active tag filter so it survives a refresh.
+      useEffect(() => {
+        localStorage.setItem("activeTags", JSON.stringify(activeTags));
+      }, [activeTags]);
+
+      // All tags present anywhere in the fleet — feeds the filter strip.
+      const allTags = useMemo(() => {
+        const s = new Set();
+        for (const v of vms) for (const t of v.config.tags ?? []) s.add(t);
+        return Array.from(s).sort();
+      }, [vms]);
+
+      // Drop filter tags that no longer exist anywhere — keeps the state honest.
+      useEffect(() => {
+        if (activeTags.length === 0) return;
+        const live = activeTags.filter(t => allTags.includes(t));
+        if (live.length !== activeTags.length) setActiveTags(live);
+      }, [allTags]);
+
+      const onToggleTag = useCallback(t => {
+        setActiveTags(curr => curr.includes(t) ? curr.filter(x => x !== t) : [...curr, t].sort());
+      }, []);
+      const onClearTags = useCallback(() => setActiveTags([]), []);
 
       // ── theme ──
       useEffect(() => {
@@ -1629,6 +1849,20 @@ packages:
         toast(`💾 ${name} saved`);
       }, [toast]);
 
+      // Tag updates fire on every chip add/remove — silent on success
+      // (the WS push delivers the new chip list within ms) and toasts only
+      // on failure so the user doesn't see "saved" 5x in a row.
+      const onUpdateTags = useCallback(async (name, tags) => {
+        try {
+          const res = await fetch(`/api/vms/${name}/config`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ tags }),
+          });
+          if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error || "failed"); }
+        } catch (e) { toast(e.message, "err"); }
+      }, [toast]);
+
       const onDownloadImage = useCallback(async (url, filename) => {
         const res = await fetch("/api/images", {
           method: "POST",
@@ -1678,7 +1912,7 @@ packages:
             : "cloud hypervisor";
 
       const mobile = isMobile();
-      const handlers = { onAct, onStart, onClone, onDelete, onSnap, onSetAutostart, onUpdateConfig };
+      const handlers = { onAct, onStart, onClone, onDelete, onSnap, onSetAutostart, onUpdateConfig, onUpdateTags };
 
       return html`
         <${Header}
@@ -1695,6 +1929,10 @@ packages:
             vms=${vms}
             selected=${selected}
             hidden=${mobile && !!selected}
+            allTags=${allTags}
+            activeTags=${activeTags}
+            onToggleTag=${onToggleTag}
+            onClearTags=${onClearTags}
             onSelect=${setSelected}
             onNew=${() => setSelected("create")}
             onOpenImages=${() => setSelected("images")} />

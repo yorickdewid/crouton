@@ -20,6 +20,12 @@ export interface VMConfig {
   disks: string[];
   /** If `true`, Crouton starts this VM automatically on its own startup. */
   autostart?: boolean;
+  /**
+   * Free-form labels for filtering and grouping. Normalised on persist:
+   * lowercased, trimmed, deduplicated, sorted. See {@link TagSchema} for the
+   * accepted alphabet.
+   */
+  tags?: string[];
 }
 
 /** Runtime metadata for a VM currently known by the manager. */

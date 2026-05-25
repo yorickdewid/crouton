@@ -3,17 +3,18 @@ import { readFile, writeFile } from "fs/promises";
 import type { VMConfig } from "../types";
 
 /**
- * Returns a copy of `cfg` with the `tags` field in canonical form
- * (lowercased, trimmed, deduplicated, sorted). Used on both read and write
- * so we don't depend on every code path going through {@link TagsSchema}.
+ * Returns a copy of `cfg` normalised for in-memory use:
+ * - `tags`: canonical form (lowercased, trimmed, deduplicated, sorted).
+ * - `bootMode`: legacy `"unknown"` rewritten to `"uefi"` since that's the
+ *   spawn-time fallback anyway. Keeps the type honest and the UI truthful.
  */
-function normalizeTags(cfg: VMConfig): VMConfig {
+function normalizeConfig(cfg: VMConfig): VMConfig {
   const raw = cfg.tags;
-  if (!Array.isArray(raw)) return { ...cfg, tags: [] };
-  const cleaned = Array.from(
-    new Set(raw.map((t) => String(t).trim().toLowerCase()).filter(Boolean)),
-  ).sort();
-  return { ...cfg, tags: cleaned };
+  const tags = Array.isArray(raw)
+    ? Array.from(new Set(raw.map((t) => String(t).trim().toLowerCase()).filter(Boolean))).sort()
+    : [];
+  const bootMode = (cfg.bootMode as string) === "unknown" ? "uefi" : cfg.bootMode;
+  return { ...cfg, tags, bootMode };
 }
 
 /**
@@ -38,14 +39,14 @@ export function createConfigStore(vmDir: string): VMConfigStore {
     async read(name) {
       try {
         const text = await readFile(pathFor(name), "utf-8");
-        return normalizeTags(JSON.parse(text) as VMConfig);
+        return normalizeConfig(JSON.parse(text) as VMConfig);
       } catch {
         return undefined;
       }
     },
 
     async write(cfg) {
-      await writeFile(pathFor(cfg.name), JSON.stringify(normalizeTags(cfg), null, 2));
+      await writeFile(pathFor(cfg.name), JSON.stringify(normalizeConfig(cfg), null, 2));
     },
   };
 }

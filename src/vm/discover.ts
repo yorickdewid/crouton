@@ -70,7 +70,10 @@ export function createDiscoverer(deps: DiscovererDeps): VMDiscoverer {
     const hasFirmware = FIRMWARE_NAMES.some(n => set.has(n));
     const hasInitrd = set.has("initrd.img") || set.has("initrd") || set.has("initramfs.img");
 
-    let bootMode: BootMode = "unknown";
+    // Default to UEFI when we can't tell — that's how toBootConfig
+    // resolves the firmware fallback at spawn time anyway, so the UI
+    // shouldn't claim "unknown" while the system silently picks UEFI.
+    let bootMode: BootMode = "uefi";
     if (kernelFile && hasInitrd) bootMode = "direct";
     else if (hasFirmware) bootMode = "uefi";
 

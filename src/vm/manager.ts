@@ -155,7 +155,7 @@ export class VMManager {
    */
   private toBootConfig(cfg: VMConfig): BootConfig {
     const vmPath = path.join(this.vmDir, cfg.name);
-    const mode = cfg.bootMode === "unknown" ? "uefi" : cfg.bootMode;
+    const mode = cfg.bootMode;
     const disks = cfg.disks.map(d => path.join(vmPath, d));
 
     let kernelPath: string | undefined;

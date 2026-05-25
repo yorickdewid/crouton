@@ -1220,7 +1220,7 @@
       const cfg = vm.config;
       const [cpus, setCpus] = useState(cfg.cpus ?? 2);
       const [memoryMb, setMemoryMb] = useState(cfg.memoryMb ?? 2048);
-      const [bootMode, setBootMode] = useState(cfg.bootMode === "unknown" ? "uefi" : cfg.bootMode);
+      const [bootMode, setBootMode] = useState(cfg.bootMode);
       const [kernelPath, setKernelPath] = useState(cfg.kernelPath ?? "");
       const [saving, setSaving] = useState(false);
       const [savedTick, setSavedTick] = useState(0);
@@ -1231,14 +1231,14 @@
       useEffect(() => {
         setCpus(cfg.cpus ?? 2);
         setMemoryMb(cfg.memoryMb ?? 2048);
-        setBootMode(cfg.bootMode === "unknown" ? "uefi" : cfg.bootMode);
+        setBootMode(cfg.bootMode);
         setKernelPath(cfg.kernelPath ?? "");
       }, [cfg.cpus, cfg.memoryMb, cfg.bootMode, cfg.kernelPath, savedTick]);
 
       const dirty =
         cpus !== (cfg.cpus ?? 2) ||
         memoryMb !== (cfg.memoryMb ?? 2048) ||
-        bootMode !== (cfg.bootMode === "unknown" ? "uefi" : cfg.bootMode) ||
+        bootMode !== cfg.bootMode ||
         (bootMode === "direct" && kernelPath !== (cfg.kernelPath ?? ""));
 
       const save = async () => {

@@ -2,7 +2,7 @@
 export type VMState = "stopped" | "booting" | "running" | "stopping" | "error";
 
 /** Boot method detected or selected for the VM. */
-export type BootMode = "direct" | "uefi" | "unknown";
+export type BootMode = "direct" | "uefi";
 
 /** Static configuration used to define and launch a VM. */
 export interface VMConfig {

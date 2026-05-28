@@ -5,7 +5,7 @@ import type { VMRunner, VMRunnerEvents } from "./runner";
  * Dependencies for {@link createRemoteRunner}.
  */
 export interface RemoteRunnerDeps {
-  /** Base URL of the croutond orchestrator, e.g. `http://127.0.0.1:7777`. */
+  /** Base URL of the croutond orchestrator, e.g. `http://[::1]:7777`. */
   url: string;
   /**
    * Per-request timeout in milliseconds. The 500 ms `WsHub` push tick is

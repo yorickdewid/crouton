@@ -17,9 +17,14 @@ export interface CroutonConfig {
   /** Filesystem path to the cloud-hypervisor binary. */
   chBinary: string;
   /**
-   * Base URL of the croutond orchestrator (e.g. `http://127.0.0.1:7777`).
+   * Base URL of the croutond orchestrator (e.g. `http://[::1]:7777`).
    * The Bun process talks to it over plain HTTP/JSON for every VM
    * lifecycle operation; see `src/vm/remote-runner.ts`.
+   *
+   * IPv6 literals must be bracketed per RFC 3986. The default uses the
+   * IPv6 loopback so croutond can bind `::1` and avoid dual-stack
+   * surprises; flip to `http://127.0.0.1:7777` if you're on a host
+   * without IPv6.
    */
   croutondUrl: string;
 }
@@ -35,5 +40,5 @@ export const config: CroutonConfig = {
   imageDir: process.env.IMAGE_DIR ?? "/home/eve/images",
   bridgeInterface: process.env.BRIDGE_INTF ?? "br0",
   chBinary: process.env.CH_BINARY ?? "./cloud-hypervisor/target/release/cloud-hypervisor",
-  croutondUrl: process.env.CROUTOND_URL ?? "http://127.0.0.1:7777",
+  croutondUrl: process.env.CROUTOND_URL ?? "http://[::1]:7777",
 };

@@ -35,7 +35,20 @@ const vmManager = new VMManager({
   firmwareDir: config.firmwareDir,
 });
 
-const wsHub = new WsHub({ vmManager, net, snapshots, hostMetrics });
+/**
+ * Periodic croutond liveness probe. Bounded by AbortSignal.timeout so a
+ * stuck croutond can never block the WsHub timer. Resolved value is sent
+ * verbatim to clients (with `ok: true` added); a throw becomes `{ok: false}`.
+ */
+const healthProbe = async (): Promise<unknown> => {
+  const res = await fetch(`${config.croutondUrl}/health`, {
+    signal: AbortSignal.timeout(2000),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+};
+
+const wsHub = new WsHub({ vmManager, net, snapshots, hostMetrics, healthProbe });
 const handleApi = createApiRouter({
   vmManager, provisioner, configStore, net, wsHub, snapshots, images, vmDir: config.vmDir,
 });

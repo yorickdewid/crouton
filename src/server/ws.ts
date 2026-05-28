@@ -20,6 +20,15 @@ export interface WsHubOptions {
   hostMetrics: HostMetrics;
   /** Refresh interval in milliseconds. Defaults to 500. */
   refreshInterval?: number;
+  /**
+   * Optional health probe — typically a `GET /health` against
+   * croutond. Pushed to clients as `{type:"health", data:{ok,...}}`.
+   * Returning a parsed body is treated as healthy; throwing is treated
+   * as unreachable.
+   */
+  healthProbe?: () => Promise<unknown>;
+  /** How often the health probe runs (ms). Defaults to 4000. */
+  healthIntervalMs?: number;
 }
 
 /**
@@ -35,7 +44,12 @@ export class WsHub {
   private readonly snapshots: SnapshotStore;
   private readonly hostMetrics: HostMetrics;
   private readonly refreshInterval: number;
+  private readonly healthProbe: (() => Promise<unknown>) | undefined;
+  private readonly healthIntervalMs: number;
   private refreshTimer: ReturnType<typeof setInterval> | undefined;
+  private healthTimer: ReturnType<typeof setInterval> | undefined;
+  /** Most recent health snapshot — sent to new clients on connect. */
+  private lastHealth: unknown = { ok: false };
 
   /**
    * @param opts - See {@link WsHubOptions}.
@@ -46,6 +60,8 @@ export class WsHub {
     this.snapshots = opts.snapshots;
     this.hostMetrics = opts.hostMetrics;
     this.refreshInterval = opts.refreshInterval ?? 500;
+    this.healthProbe = opts.healthProbe;
+    this.healthIntervalMs = opts.healthIntervalMs ?? 4000;
   }
 
   /**
@@ -61,9 +77,12 @@ export class WsHub {
    */
   addClient(ws: Client): void {
     this.clients.add(ws);
-    // Send initial VM + host snapshot so the dashboard renders immediately.
+    // Send initial VM + host + last-known-health snapshot so the
+    // dashboard renders immediately without waiting for the next tick.
     this.pushVMs().catch(() => { /* swallow — broadcast errors mustn't crash add */ });
     this.pushHost().catch(() => { /* same */ });
+    try { ws.send(JSON.stringify({ type: "health", data: this.lastHealth })); }
+    catch { /* dropped send becomes a disconnect naturally */ }
   }
 
   /**
@@ -93,22 +112,46 @@ export class WsHub {
    * Begins the periodic refresh loop. Idempotent.
    */
   startRefreshLoop(): void {
-    if (this.refreshTimer) return;
-    this.refreshTimer = setInterval(async () => {
-      if (this.clientCount === 0) return; // skip work when nobody listening
-      await this.pushVMs();
-      await this.pushCounters();
-      await this.pushHost();
-    }, this.refreshInterval);
+    if (!this.refreshTimer) {
+      this.refreshTimer = setInterval(async () => {
+        if (this.clientCount === 0) return; // skip work when nobody listening
+        await this.pushVMs();
+        await this.pushCounters();
+        await this.pushHost();
+      }, this.refreshInterval);
+    }
+    if (this.healthProbe && !this.healthTimer) {
+      // Run the probe once on startup so the pill renders without
+      // waiting for the first tick.
+      this.pushHealth();
+      this.healthTimer = setInterval(() => { this.pushHealth(); }, this.healthIntervalMs);
+    }
   }
 
   /**
-   * Stops the periodic refresh loop. Safe to call multiple times.
+   * Stops both timers. Safe to call multiple times.
    */
   stopRefreshLoop(): void {
-    if (!this.refreshTimer) return;
-    clearInterval(this.refreshTimer);
-    this.refreshTimer = undefined;
+    if (this.refreshTimer) { clearInterval(this.refreshTimer); this.refreshTimer = undefined; }
+    if (this.healthTimer) { clearInterval(this.healthTimer); this.healthTimer = undefined; }
+  }
+
+  /**
+   * Runs the configured health probe and broadcasts the result. Treats
+   * any thrown error / timeout as `{ok: false}`. Keeps the most recent
+   * snapshot in {@link lastHealth} so new clients get it immediately.
+   */
+  private async pushHealth(): Promise<void> {
+    if (!this.healthProbe) return;
+    let payload: Record<string, unknown>;
+    try {
+      const data = await this.healthProbe();
+      payload = { ok: true, ...(data as Record<string, unknown>) };
+    } catch (e) {
+      payload = { ok: false, error: (e as Error).message };
+    }
+    this.lastHealth = payload;
+    this.send({ type: "health", data: payload });
   }
 
   /**

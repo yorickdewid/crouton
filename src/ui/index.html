@@ -469,6 +469,35 @@
     .toast.fade { opacity: 0; transition: opacity 0.4s; }
     [data-theme="light"] .toast { box-shadow: 0 2px 6px rgba(0,0,0,0.06); }
 
+    /* croutond health pill — sits just left of the theme toggle */
+    .health-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      color: var(--dim);
+      font-size: 11px;
+      padding: 2px 8px;
+      margin-right: 8px;
+      user-select: none;
+      cursor: default;
+    }
+    .health-pill .health-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--muted);
+      flex-shrink: 0;
+    }
+    .health-pill.ok .health-dot { background: #3fbf6e; }
+    .health-pill.err {
+      color: var(--danger);
+      border-color: var(--danger);
+    }
+    .health-pill.err .health-dot { background: var(--danger); }
+
     /* theme toggle button */
     .theme-toggle {
       background: var(--surface);
@@ -1035,7 +1064,20 @@
       `;
     }
 
-    function Header({ subtitle, theme, onBack, onToggleTheme, showBack }) {
+    function HealthPill({ health }) {
+      const ok = !!health?.ok;
+      const title = ok
+        ? `croutond ${health.version ?? ""} — pool ${health.poolInUse ?? "?"}/${(health.poolSize ?? "?")}, ${health.poolIdle ?? "?"} idle`.trim()
+        : `croutond unreachable${health?.error ? ` — ${health.error}` : ""}`;
+      return html`
+        <span class=${"health-pill " + (ok ? "ok" : "err")} title=${title}>
+          <span class="health-dot"></span>
+          croutond
+        </span>
+      `;
+    }
+
+    function Header({ subtitle, theme, health, onBack, onToggleTheme, showBack }) {
       return html`
         <header>
           ${showBack ? html`<button class="back-btn" style="display:inline-flex" onClick=${onBack}><${Icon} icon=${ArrowLeft} size=${13} /> back</button>` : null}
@@ -1043,6 +1085,7 @@
           <span class="sep">/</span>
           <span class="subtitle">${subtitle}</span>
           <span class="spacer"></span>
+          <${HealthPill} health=${health} />
           <button class="theme-toggle" onClick=${onToggleTheme} title=${theme === "dark" ? "switch to light" : "switch to dark"}>
             <${Icon} icon=${theme === "dark" ? Moon : Sun} size=${14} />
           </button>
@@ -1737,6 +1780,7 @@ packages:
     function App() {
       const [vms, setVms] = useState([]);
       const [host, setHost] = useState(null);
+      const [health, setHealth] = useState({ ok: false });
       const [images, setImages] = useState([]);
       const [selected, setSelected] = useState(null);
       const [theme, setTheme] = useState(localStorage.getItem("theme") || "dark");
@@ -1801,6 +1845,7 @@ packages:
               const msg = JSON.parse(e.data);
               if (msg.type === "vms") setVms(msg.data);
               else if (msg.type === "host") setHost(msg.data);
+              else if (msg.type === "health") setHealth(msg.data ?? { ok: false });
               else if (msg.type === "counters") {
                 ingestCounters(history.current, msg.ts, msg.data);
                 setTick(t => t + 1);
@@ -2004,6 +2049,7 @@ packages:
         <${Header}
           subtitle=${subtitle}
           theme=${theme}
+          health=${health}
           showBack=${mobile && !!selected}
           onBack=${() => setSelected(null)}
           onToggleTheme=${() => setTheme(t => t === "dark" ? "light" : "dark")} />

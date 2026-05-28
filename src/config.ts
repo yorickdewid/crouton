@@ -16,6 +16,12 @@ export interface CroutonConfig {
   bridgeInterface: string;
   /** Filesystem path to the cloud-hypervisor binary. */
   chBinary: string;
+  /**
+   * Base URL of the croutond orchestrator (e.g. `http://127.0.0.1:7777`).
+   * The Bun process talks to it over plain HTTP/JSON for every VM
+   * lifecycle operation; see `src/vm/remote-runner.ts`.
+   */
+  croutondUrl: string;
 }
 
 /**
@@ -29,4 +35,5 @@ export const config: CroutonConfig = {
   imageDir: process.env.IMAGE_DIR ?? "/home/eve/images",
   bridgeInterface: process.env.BRIDGE_INTF ?? "br0",
   chBinary: process.env.CH_BINARY ?? "./cloud-hypervisor/target/release/cloud-hypervisor",
+  croutondUrl: process.env.CROUTOND_URL ?? "http://127.0.0.1:7777",
 };

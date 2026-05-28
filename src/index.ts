@@ -1,5 +1,4 @@
 import { config } from "./config";
-import { createCloudHypervisor } from "./api/ch";
 import { createNetwork } from "./net/manager";
 import { createConfigStore } from "./vm/persist";
 import { createProvisioner } from "./vm/create";
@@ -7,12 +6,13 @@ import { createDiscoverer } from "./vm/discover";
 import { createSnapshotStore } from "./vm/snapshots";
 import { createHostMetrics } from "./host/metrics";
 import { createImageStore } from "./images/store";
-import { createLocalRunner } from "./vm/local-runner";
+import { createRemoteRunner } from "./vm/remote-runner";
 import { VMManager } from "./vm/manager";
 import { WsHub } from "./server/ws";
 import { createApiRouter } from "./routes/api";
 
-const chApi = createCloudHypervisor(config.vmDir);
+// `net` is no longer used by the runner — croutond owns TAP/bridge.
+// It stays for discovery (MAC derivation, ARP-based IP lookup).
 const net = createNetwork(config.bridgeInterface);
 const configStore = createConfigStore(config.vmDir);
 const provisioner = createProvisioner({ imageDir: config.imageDir, vmDir: config.vmDir, configStore });
@@ -20,10 +20,10 @@ const snapshots = createSnapshotStore(config.vmDir);
 const hostMetrics = createHostMetrics(config.vmDir);
 const images = createImageStore(config.imageDir);
 
-// The runner is the only consumer of chApi + net for spawn-side work.
-// When croutond exists it will be replaced by createRemoteRunner(...).
-const runner = createLocalRunner({ chApi, net, vmDir: config.vmDir, chBinary: config.chBinary });
+const runner = createRemoteRunner({ url: config.croutondUrl });
 const discoverer = createDiscoverer({ vmDir: config.vmDir, configStore, runner, net });
+
+console.log(`croutond at ${config.croutondUrl}`);
 
 const seed = await discoverer.discover();
 console.log(`discovered ${seed.length} VM(s): ${seed.map(v => `${v.label}(${v.state})`).join(", ")}`);

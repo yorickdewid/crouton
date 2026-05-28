@@ -101,12 +101,26 @@ export class VMManager {
     return instance;
   }
 
-  /** Graceful shutdown via the runner (which falls back to SIGTERM internally). */
+  /**
+   * Graceful shutdown via the runner (which falls back to SIGTERM
+   * internally). On success we drive the state to `"stopped"` here
+   * directly — the LocalRunner also fires `onExit` which redundantly
+   * sets the same state (idempotent), and the RemoteRunner has no
+   * `onExit` to fire at all, so this is the only signal it can rely on.
+   */
   async stopVM(id: string): Promise<void> {
     const vm = this.instances.get(id);
     if (!vm) throw new Error(`VM '${id}' not found`);
     this.setState(id, "stopping");
-    await this.runner.stop(id);
+    try {
+      await this.runner.stop(id);
+    } catch (err) {
+      this.setState(id, "error");
+      throw err;
+    }
+    this.setState(id, "stopped");
+    vm.pid = undefined;
+    vm.tapInterface = undefined;
   }
 
   /**

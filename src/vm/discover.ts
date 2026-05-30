@@ -38,6 +38,7 @@ export interface VMDiscoverer {
 }
 
 const KERNEL_NAMES = ["vmlinuz", "kernel", "bzImage", "Image"];
+const INITRD_NAMES = ["initrd.img", "initrd", "initramfs.img"];
 const FIRMWARE_NAMES = ["CLOUDHV.fd", "OVMF.fd", "edk2.fd"];
 
 /**
@@ -66,9 +67,10 @@ export function createDiscoverer(deps: DiscovererDeps): VMDiscoverer {
 
     const kernelFile = KERNEL_NAMES.find(n => set.has(n))
       ?? files.find(f => !f.includes(".") || f.endsWith("vmlinuz") || f.endsWith("kernel"));
+    const initrdFile = INITRD_NAMES.find(n => set.has(n));
 
     const hasFirmware = FIRMWARE_NAMES.some(n => set.has(n));
-    const hasInitrd = set.has("initrd.img") || set.has("initrd") || set.has("initramfs.img");
+    const hasInitrd = Boolean(initrdFile);
 
     // Default to UEFI when we can't tell — that's how toBootConfig
     // resolves the firmware fallback at spawn time anyway.
@@ -82,7 +84,7 @@ export function createDiscoverer(deps: DiscovererDeps): VMDiscoverer {
 
     // No persisted config — use the directory name as both id and label
     // so the user still sees something meaningful in the sidebar.
-    return { id: vmId, label: vmId, bootMode, kernelPath: kernelFile, disks };
+    return { id: vmId, label: vmId, bootMode, kernelPath: kernelFile, initrdPath: initrdFile, disks };
   };
 
   const enrichFromRunner = async (vmId: string, instance: VMInstance): Promise<void> => {

@@ -27,6 +27,8 @@ export interface VMConfig {
   bootMode: BootMode;
   /** Optional kernel image path for direct boot mode. */
   kernelPath?: string;
+  /** Optional initrd image path for direct boot mode. */
+  initrdPath?: string;
   /** Attached disk image paths. */
   disks: string[];
   /** If `true`, Crouton starts this VM automatically on its own startup. */

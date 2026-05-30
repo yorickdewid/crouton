@@ -185,7 +185,7 @@ export class VMManager {
 
     if (mode === "direct" && cfg.kernelPath) {
       kernelPath = path.join(vmPath, cfg.kernelPath);
-      initrdPath = path.join(vmPath, "initrd.img");
+      initrdPath = path.join(vmPath, cfg.initrdPath ?? "initrd.img");
       cmdline = "console=hvc0 root=/dev/vda1 rw rootfstype=ext4";
     } else {
       const localFw = path.join(vmPath, "CLOUDHV.fd");

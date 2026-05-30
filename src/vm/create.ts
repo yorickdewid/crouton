@@ -109,6 +109,7 @@ export const VMConfigPatchSchema = z.object({
   memoryMb: z.number().int().min(64).max(4_194_304).optional(),
   bootMode: z.enum(["direct", "uefi"]).optional(),
   kernelPath: z.string().max(255).optional(),
+  initrdPath: z.string().max(255).optional(),
   autostart: z.boolean().optional(),
   tags: TagsSchema.optional(),
 });

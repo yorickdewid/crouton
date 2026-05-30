@@ -197,4 +197,4 @@ The TypeScript types in `src/orchestrator/contract.ts` are the spec.
 When done, the Rust types should serialize/deserialize to the same
 JSON. Easiest validation: write a small Bun script that exercises every
 endpoint and asserts the shapes. That's also reusable when
-`RemoteVMRunner` lands.
+`RemoteVMRunner` evolves.

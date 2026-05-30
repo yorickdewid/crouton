@@ -158,7 +158,7 @@ Response:
 | Single CH VMM crashes           | croutond marks slot dead, removes it from pool, optionally spawns a replacement. The affected VM goes to `error` state in Bun. |
 | Network blip Bun↔croutond       | Bun shows `wsLive=false` for state pushes; cached state remains. Actions block until reconnect. |
 
-## Bun-side refactor needed before croutond exists
+## Bun-side execution seam
 
 Extract a `VMRunner` interface from `VMManager`:
 
@@ -175,30 +175,22 @@ interface VMRunner {
 }
 ```
 
-Implementations:
-- `LocalVMRunner` — current logic (`Bun.spawn`, NetworkManager, CH HTTP client).
+Implementation:
 - `RemoteVMRunner` — calls croutond over HTTP using the contract.
 
 `VMManager` keeps its in-memory map of VMs, but its `startVM` /
 `stopVM` / `deleteVM` methods delegate to a `VMRunner` for the
 process-level work.
 
-`NetworkManager` moves *into* `LocalVMRunner`. Once `RemoteVMRunner`
-is the only implementation, the module disappears from Bun.
+`NetworkManager` remains in Bun for discovery and host-side lookups; it
+is no longer part of VM boot ownership.
 
 ## Roadmap
 
-1. **Now (done):** memory + this doc + `src/orchestrator/contract.ts`.
-2. **Bun refactor:** extract `VMRunner` interface, keep `LocalVMRunner`
-   as the only implementation. No behaviour change.
-3. **First croutond:** minimal Rust binary with the pool, the wire
-   endpoints, and no proxying yet. Bun stays on `LocalVMRunner`.
-4. **Wire it up:** `RemoteVMRunner` implementation in Bun + integration
-   smoke test.
-5. **Flip the default:** make `RemoteVMRunner` the default runner.
-   `LocalVMRunner` removed; `NetworkManager` removed from Bun.
-6. **Polish:** snapshot restore, pool growth/reap policy, optional
-   mTLS for remote.
+1. **Done:** `VMRunner` seam + `RemoteVMRunner` default in Bun.
+2. **Harden:** integration smoke tests against croutond endpoints.
+3. **Polish:** snapshot restore, pool growth/reap policy, optional
+  mTLS for remote.
 
 ## Open questions
 

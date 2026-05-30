@@ -31,17 +31,13 @@ Three layers, each owning one concern:
 - **crouton** proxies the WS through to the browser so the browser
   only ever knows about Bun.
 
-Until croutond exists, Bun does its job locally inside `LocalVMRunner`.
-Same interface, no proxy hop.
-
 ## 1. CH side
 
 Cloud Hypervisor lets you pick the transport for serial and
 virtio-console: `tty`, `pty`, `file`, or `socket=<path>`. The console
 work needs `socket` — a UDS the host can read and write to.
 
-New flags for spawning, replacing today's defaults in
-`LocalRunner.buildChArgs`:
+New flags for spawning in croutond:
 
 | Boot mode | Today                                          | For console                                                           |
 |-----------|------------------------------------------------|-----------------------------------------------------------------------|
@@ -121,9 +117,8 @@ node-local concern croutond owns. Bun is dumb glue. This also means
 multiple browsers on the same VM each get their own Bun WS but share
 croutond's single socket reader.
 
-For single-host before croutond ships: same endpoint shape, but Bun
-opens the CH serial socket directly inside `LocalVMRunner` and does
-the fan-out itself.
+For single-host, keep the same endpoint shape; Bun remains a proxy and
+croutond owns the serial socket reader + fan-out.
 
 ## 5. Failure modes
 
@@ -148,18 +143,17 @@ upgrade. Worth scoping the console work alongside Bun-side auth.
 
 A clean order that minimises rework:
 
-1. **CH flag change**: swap `--serial tty` to `--serial socket=…` (UEFI)
-   and add `--console socket=…` for direct-boot in
-   `LocalRunner.buildChArgs`. Validate with `socat - UNIX-CONNECT:…`
-   from the host — you should see the boot log and a login prompt.
-2. **Bun WS endpoint**: `/api/vms/:name/console`, ring buffer,
-   fan-out, raw byte piping straight to the CH socket inside
-   `LocalVMRunner`.
-3. **UI**: xterm.js modal, "console" button on running VMs.
-4. **Auth**: token-gated WS upgrade. Required before any non-loopback
-   exposure.
-5. **When croutond ships**: move the socket reader + fan-out into
-   croutond. Bun becomes a WS proxy. The UI doesn't change.
+1. **CH flag change (croutond)**: swap `--serial tty` to
+  `--serial socket=…` (UEFI) and add `--console socket=…` for
+  direct-boot. Validate with `socat - UNIX-CONNECT:…` from the host —
+  you should see the boot log and a login prompt.
+2. **Croutond WS endpoint**: `/vms/:name/console`, ring buffer,
+  fan-out, raw byte piping to the CH socket.
+3. **Bun WS proxy endpoint**: `/api/vms/:name/console`, transparent
+  proxy to croutond.
+4. **UI**: xterm.js modal, "console" button on running VMs.
+5. **Auth**: token-gated WS upgrade. Required before any non-loopback
+  exposure.
 
 ## 8. Stretch ideas (don't build yet)
 

@@ -2,31 +2,26 @@ import type { BootConfig, VMRuntime } from "../orchestrator/contract";
 
 /**
  * Optional lifecycle hooks passed to {@link VMRunner.start}. Today only
- * `onExit` is observed; the runner calls it after the underlying VMM exits
- * so the caller can update its tracked state.
+ * `onExit` is observed; implementations may call it after the underlying
+ * VMM exits so the caller can update its tracked state.
  */
 export interface VMRunnerEvents {
   /**
-   * Fires after the VMM process has fully exited and the runner has cleaned
-   * up its TAP / socket. The `exitCode` matches CH's process exit code (0
-   * = clean shutdown, anything else = treat as error).
+   * Fires after the VMM has fully exited. The `exitCode` follows Cloud
+   * Hypervisor semantics (0 = clean shutdown, anything else = treat as
+   * error). Remote runners may omit this callback when lifecycle events
+   * are not pushed by the orchestrator.
    */
   onExit?: (name: string, exitCode: number) => void;
 }
 
 /**
  * The execution seam between {@link VMManager} and the world of running
- * VMMs. Two implementations are planned:
+ * VMMs. The Bun process uses a remote orchestrator implementation that
+ * talks to `croutond` over the wire contract in
+ * `src/orchestrator/contract.ts`.
  *
- * - `LocalVMRunner` — spawns CH directly inside Bun (today's behaviour,
- *   lives in `src/vm/local-runner.ts`). Used while we don't have a
- *   separate orchestrator yet.
- * - `RemoteVMRunner` — talks to the future `croutond` daemon over the
- *   wire contract in `src/orchestrator/contract.ts`. Will replace
- *   `LocalVMRunner` once croutond exists.
- *
- * The interface is the same for both: callers above this seam never see
- * CH, sudo, TAPs, or pool slots.
+ * Callers above this seam never see CH, sudo, TAPs, or pool slots.
  */
 export interface VMRunner {
   /**
@@ -36,7 +31,7 @@ export interface VMRunner {
    * @throws If a VM with this name is already running on this runner.
    */
   start(config: BootConfig, events?: VMRunnerEvents): Promise<VMRuntime>;
-  /** Graceful shutdown via CH, falling back to SIGTERM. */
+  /** Graceful shutdown via the orchestrator. */
   stop(name: string): Promise<void>;
   /** Proxy CH's `/vm.reboot`. */
   reboot(name: string): Promise<void>;

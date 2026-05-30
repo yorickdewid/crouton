@@ -1,5 +1,5 @@
 import path from "path";
-import { stat } from "fs/promises";
+import type { VMRuntime } from "../orchestrator/contract";
 import type { VMRunner } from "./runner";
 import type { NetworkManager } from "../net/manager";
 import type { VMConfigStore } from "./persist";
@@ -23,7 +23,7 @@ export interface DiscovererDeps {
   vmDir: string;
   /** Source of authoritative per-VM configs when present. */
   configStore: VMConfigStore;
-  /** Runtime backend used to ping running VMs and enrich config from `vm.info`. */
+  /** Runtime backend used to list live VMs and enrich config from `vm.info`. */
   runner: VMRunner;
   /** Network helper used for MAC generation and IP resolution. */
   net: NetworkManager;
@@ -43,8 +43,8 @@ const FIRMWARE_NAMES = ["CLOUDHV.fd", "OVMF.fd", "edk2.fd"];
 
 /**
  * Builds a {@link VMDiscoverer}. Per VM, it prefers a persisted
- * `crouton.json` over filesystem inference, and pings the Cloud Hypervisor
- * socket to determine live state.
+ * `crouton.json` over filesystem inference, and asks the runner
+ * (backed by croutond) which VMs are currently live.
  */
 export function createDiscoverer(deps: DiscovererDeps): VMDiscoverer {
   const { vmDir, configStore, runner, net } = deps;
@@ -98,12 +98,10 @@ export function createDiscoverer(deps: DiscovererDeps): VMDiscoverer {
     }
   };
 
-  const discoverOne = async (id: string): Promise<VMInstance> => {
+  const discoverOne = async (id: string, runtime?: VMRuntime): Promise<VMInstance> => {
     const dir = path.join(vmDir, id);
-    const sockPath = path.join(dir, "vmm.sock");
     const files = await listEntries(dir);
 
-    const hasSock = await stat(sockPath).then(s => s.isSocket()).catch(() => false);
     const persisted = await configStore.read(id);
     const vmConfig = persisted ?? inferConfig(id, files);
     const mac = net.macFor(id);
@@ -116,13 +114,13 @@ export function createDiscoverer(deps: DiscovererDeps): VMDiscoverer {
       config: vmConfig,
     };
 
-    if (hasSock) {
-      const alive = await runner.ping(id).catch(() => false);
-      instance.state = alive ? "running" : "error";
-      if (alive) {
-        await enrichFromRunner(id, instance);
-        instance.ip = await net.macToIp(mac);
-      }
+    if (runtime) {
+      instance.state = runtime.state;
+      instance.pid = runtime.pid;
+      instance.tapInterface = runtime.tap;
+      instance.startedAt = runtime.startedAt ? new Date(runtime.startedAt) : undefined;
+      await enrichFromRunner(id, instance);
+      instance.ip = await net.macToIp(mac);
     }
 
     return instance;
@@ -131,7 +129,9 @@ export function createDiscoverer(deps: DiscovererDeps): VMDiscoverer {
   return {
     async discover() {
       const ids = await listEntries(vmDir);
-      const instances = await Promise.all(ids.map(discoverOne));
+      const running = await runner.listRunning().catch(() => []);
+      const runningById = new Map(running.map(vm => [vm.name, vm]));
+      const instances = await Promise.all(ids.map(id => discoverOne(id, runningById.get(id))));
       // Sort by label so the sidebar reads naturally to humans even though
       // directory ids are time-encoded ULIDs.
       return instances.sort((a, b) => a.label.localeCompare(b.label));

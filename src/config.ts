@@ -27,6 +27,18 @@ export interface CroutonConfig {
    * without IPv6.
    */
   croutondUrl: string;
+  /**
+   * Optional absolute HTTP(S) base URL used by the web UI for `/api/...`
+   * requests (e.g. `https://ops.example.net:3000`). Leave empty to use
+   * same-origin requests.
+   */
+  uiApiBase: string;
+  /**
+   * Optional absolute WS(S) base URL used by the web UI for `/ws`
+   * connections (e.g. `wss://ops.example.net:3000`). Leave empty to use
+   * same-origin websocket URL derivation.
+   */
+  uiWsBase: string;
 }
 
 /**
@@ -41,4 +53,6 @@ export const config: CroutonConfig = {
   bridgeInterface: process.env.BRIDGE_INTF ?? "br0",
   chBinary: process.env.CH_BINARY ?? "./cloud-hypervisor/target/release/cloud-hypervisor",
   croutondUrl: process.env.CROUTOND_URL ?? "http://[::1]:7777",
+  uiApiBase: process.env.CROUTON_UI_API_BASE ?? "",
+  uiWsBase: process.env.CROUTON_UI_WS_BASE ?? "",
 };

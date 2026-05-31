@@ -67,7 +67,11 @@ if (autostartTargets.length > 0) {
   }
 }
 
-const ui = await Bun.file(`${import.meta.dir}/ui/index.html`).text();
+const uiPath = `${import.meta.dir}/ui/index.html`;
+const uiRuntimeJson = JSON.stringify({
+  apiBase: config.uiApiBase,
+  wsBase: config.uiWsBase,
+}).replace(/</g, "\\u003c");
 
 const server = Bun.serve({
   port: config.port,
@@ -87,6 +91,8 @@ const server = Bun.serve({
     }
 
     if (pathname === "/" || pathname === "/index.html") {
+      const ui = (await Bun.file(uiPath).text())
+        .replace("__CROUTON_RUNTIME_CONFIG__", uiRuntimeJson);
       return new Response(ui, { headers: { "Content-Type": "text/html" } });
     }
 

@@ -128,9 +128,12 @@ export function createDiscoverer(deps: DiscovererDeps): VMDiscoverer {
 
   return {
     async discover() {
-      const ids = await listEntries(vmDir);
       const running = await runner.listRunning().catch(() => []);
       const runningById = new Map(running.map(vm => [vm.name, vm]));
+      const localIds = await listEntries(vmDir);
+      // Include VMs known only to croutond (no local directory/config yet),
+      // so remote-managed fleets still appear in the sidebar.
+      const ids = Array.from(new Set([...localIds, ...runningById.keys()]));
       const instances = await Promise.all(ids.map(id => discoverOne(id, runningById.get(id))));
       // Sort by label so the sidebar reads naturally to humans even though
       // directory ids are time-encoded ULIDs.

@@ -1451,13 +1451,71 @@
 
     /* filter strip — sits above the list-top inside the sidebar */
     .filter-strip {
-      padding: 6px 12px 8px;
+      padding: 6px 12px;
       border-bottom: 1px solid var(--border);
       display: flex;
       flex-wrap: wrap;
       align-items: center;
       gap: 4px;
       background: var(--bg);
+    }
+
+    .fleet-search-wrap {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid var(--border);
+      border-radius: 0;
+      padding: 1px 0 5px;
+      margin-bottom: 1px;
+      transition: border-color 0.12s;
+    }
+
+    .fleet-search-wrap:focus-within {
+      border-bottom-color: var(--accent);
+    }
+
+    .fleet-search-wrap .lucide {
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+
+    .fleet-search {
+      flex: 1;
+      min-width: 0;
+      border: none;
+      outline: none;
+      background: transparent;
+      color: var(--text);
+      font-family: var(--font);
+      font-size: 11px;
+      line-height: 1.4;
+      padding: 0;
+    }
+
+    .fleet-search::placeholder {
+      color: var(--muted);
+    }
+
+    .fleet-search-clear {
+      border: none;
+      background: none;
+      color: var(--muted);
+      cursor: pointer;
+      padding: 0;
+      width: 14px;
+      height: 14px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .fleet-search-clear:hover {
+      color: var(--text);
     }
 
     .mobile-dock {
@@ -1658,7 +1716,7 @@
     import {
       Camera, Package, Zap, Moon, Sun, ArrowLeft, ArrowDown, ArrowUp,
       ChevronDown, ChevronUp, Play, Pause, RotateCcw, Power, Copy,
-      Trash2, AlertTriangle, Plus, X, Tag, Filter
+      Trash2, AlertTriangle, Plus, X, Tag, Filter, Search
     } from "https://esm.sh/lucide@0.475.0";
 
     // ── constants ────────────────────────────────────────────────────────
@@ -2049,17 +2107,64 @@
       `;
     }
 
-    function VMList({ vms, selected, onSelect, onNew, onOpenImages, hidden, allTags, activeTags, onToggleTag, onClearTags }) {
-      const filtered = activeTags.length === 0
-        ? vms
-        : vms.filter(vm => activeTags.every(t => (vm.config.tags ?? []).includes(t)));
+    function VMList({
+      vms,
+      selected,
+      onSelect,
+      onNew,
+      onOpenImages,
+      hidden,
+      allTags,
+      activeTags,
+      onToggleTag,
+      onClearTags,
+      search,
+      onSearch,
+      onClearSearch,
+    }) {
+      const q = search.trim().toLowerCase();
+      const filtered = vms.filter(vm => {
+        const tags = vm.config.tags ?? [];
+        if (activeTags.length > 0 && !activeTags.every(t => tags.includes(t))) return false;
+        if (!q) return true;
+
+        const idSuffix = vm.id.slice(-4);
+        const haystack = [
+          vm.label,
+          vm.id,
+          idSuffix,
+          vm.ip ?? "",
+          vm.mac ?? "",
+          vm.state,
+          vm.config.bootMode,
+          ...tags,
+        ].join(" ").toLowerCase();
+
+        return haystack.includes(q);
+      });
       // Identify labels that appear more than once in the visible list —
       // those rows get a trailing id suffix so the user can tell them apart.
       const labelCounts = filtered.reduce((m, v) => m.set(v.label, (m.get(v.label) ?? 0) + 1), new Map());
       return html`
         <div class=${"vm-list" + (hidden ? " hidden" : "")}>
-          ${allTags.length > 0 ? html`
-            <div class="filter-strip">
+          <div class="filter-strip">
+            <div class="fleet-search-wrap">
+              <${Icon} icon=${Search} size=${12} />
+              <input
+                class="fleet-search"
+                type="search"
+                value=${search}
+                placeholder="search fleet"
+                onInput=${e => onSearch(e.target.value)}
+                spellcheck=${false}
+                autocomplete="off" />
+              ${search ? html`
+                <button class="fleet-search-clear" title="clear search" onClick=${onClearSearch}>
+                  <${Icon} icon=${X} size=${12} strokeWidth=${2.5} />
+                </button>
+              ` : null}
+            </div>
+            ${allTags.length > 0 ? html`
               <span class="filter-strip-icon" title="filter by tags"><${Icon} icon=${Filter} size=${12} /></span>
               ${allTags.map(t => html`
                 <span
@@ -2067,21 +2172,31 @@
                   key=${t}
                   onClick=${() => onToggleTag(t)}>${t}</span>
               `)}
-              ${activeTags.length > 0 ? html`<button class="filter-clear" onClick=${onClearTags}>clear</button>` : null}
-            </div>
-          ` : null}
+            ` : null}
+            ${activeTags.length > 0 ? html`<button class="filter-clear" onClick=${onClearTags}>clear tags</button>` : null}
+          </div>
           <div class="list-top">
-            <span>VMs${activeTags.length ? html` <span style="color:var(--dim);text-transform:none;letter-spacing:0;font-size:11px">· ${filtered.length}/${vms.length}</span>` : ""}</span>
+            <span>
+              VMs
+              ${activeTags.length || search
+          ? html` <span style="color:var(--dim);text-transform:none;letter-spacing:0;font-size:11px">· ${filtered.length}/${vms.length}</span>`
+          : ""}
+            </span>
             <div style="display:flex;gap:8px">
               <button class="new-btn" onClick=${onOpenImages}><${Icon} icon=${Package} size=${12} /> images</button>
               <button class="new-btn" onClick=${onNew}><${Icon} icon=${Plus} size=${12} /> new</button>
             </div>
           </div>
           <div class="vm-rows">
-            ${filtered.length === 0 && activeTags.length > 0 ? html`
+            ${filtered.length === 0 && (activeTags.length > 0 || search) ? html`
               <div style="padding:24px 16px;color:var(--muted);font-size:12px;text-align:center">
-                no VMs match <span style="color:var(--dim)">${activeTags.join(", ")}</span>
-                <div style="margin-top:8px"><button class="new-btn" onClick=${onClearTags}>clear filter</button></div>
+                no VMs match
+                ${search ? html` <span style="color:var(--dim)">"${search}"</span>` : ""}
+                ${activeTags.length ? html` <span style="color:var(--dim)">(${activeTags.join(", ")})</span>` : ""}
+                <div style="margin-top:8px;display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+                  ${search ? html`<button class="new-btn" onClick=${onClearSearch}>clear search</button>` : null}
+                  ${activeTags.length ? html`<button class="new-btn" onClick=${onClearTags}>clear tags</button>` : null}
+                </div>
               </div>
             ` : filtered.map(vm => html`
               <${VMRow}
@@ -2643,6 +2758,7 @@ packages:
       const [selected, setSelected] = useState(null);
       const [theme, setTheme] = useState(localStorage.getItem("theme") || "dark");
       const [toasts, setToasts] = useState([]);
+      const [search, setSearch] = useState(() => localStorage.getItem("fleetSearch") || "");
       const [activeTags, setActiveTags] = useState(() => {
         try { return JSON.parse(localStorage.getItem("activeTags") || "[]"); }
         catch { return []; }
@@ -2654,6 +2770,10 @@ packages:
       useEffect(() => {
         localStorage.setItem("activeTags", JSON.stringify(activeTags));
       }, [activeTags]);
+
+      useEffect(() => {
+        localStorage.setItem("fleetSearch", search);
+      }, [search]);
 
       // All tags present anywhere in the fleet — feeds the filter strip.
       const allTags = useMemo(() => {
@@ -2673,6 +2793,7 @@ packages:
         setActiveTags(curr => curr.includes(t) ? curr.filter(x => x !== t) : [...curr, t].sort());
       }, []);
       const onClearTags = useCallback(() => setActiveTags([]), []);
+      const onClearSearch = useCallback(() => setSearch(""), []);
 
       // ── theme ──
       useEffect(() => {
@@ -2953,6 +3074,9 @@ packages:
             activeTags=${activeTags}
             onToggleTag=${onToggleTag}
             onClearTags=${onClearTags}
+            search=${search}
+            onSearch=${setSearch}
+            onClearSearch=${onClearSearch}
             onSelect=${setSelected}
             onNew=${() => setSelected("create")}
             onOpenImages=${() => setSelected("images")} />

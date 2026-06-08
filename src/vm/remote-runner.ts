@@ -85,7 +85,7 @@ export function createRemoteRunner(deps: RemoteRunnerDeps): VMRunner {
     },
 
     reboot: async (id) => { await call("PUT", `${idPath(id)}/reboot`); },
-    pause:  async (id) => { await call("PUT", `${idPath(id)}/pause`); },
+    pause: async (id) => { await call("PUT", `${idPath(id)}/pause`); },
     resume: async (id) => { await call("PUT", `${idPath(id)}/resume`); },
     snapshot: async (id, destPath) => { await call("PUT", `${idPath(id)}/snapshot`, { destPath }); },
 
